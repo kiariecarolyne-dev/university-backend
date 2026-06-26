@@ -5,15 +5,17 @@ require("dotenv").config();
 const Stripe = require("stripe");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// 🧠 FIREBASE ADMIN
-const admin = require("firebase-admin");
+// 🧠 FIREBASE ADMIN (NEW VERSION FOR firebase-admin v14)
+const { initializeApp, cert } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+
 const serviceAccount = require("./serviceAccountKey.json");
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+initializeApp({
+  credential: cert(serviceAccount),
 });
 
-const db = admin.firestore();
+const db = getFirestore();
 
 const app = express();
 
@@ -64,9 +66,9 @@ app.post("/create-checkout-session", async (req, res) => {
 
     // 🇰🇪 Kenya pricing
     if (currency === "kes") {
-      if (plan === "daily") price = 50;      
-      if (plan === "weekly") price = 200;    
-      if (plan === "monthly") price = 800;   
+      if (plan === "daily") price = 50;
+      if (plan === "weekly") price = 200;
+      if (plan === "monthly") price = 800;
     }
 
     // 🇺🇸 USD pricing
@@ -89,15 +91,12 @@ app.post("/create-checkout-session", async (req, res) => {
       line_items: [
         {
           price_data: {
-            currency: currency,   // kes or usd
+            currency: currency,
             product_data: {
               name: `University Universal ${plan} subscription`,
             },
-
-            // Stripe smallest unit
             unit_amount: price,
           },
-
           quantity: 1,
         },
       ],
