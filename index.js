@@ -159,6 +159,12 @@ app.get("/cancel", (req, res) => {
 });
 
 
+// 🧪 DEBUG ROUTE (TEMPORARY TEST)
+app.get("/test-price", (req, res) => {
+  res.send("KES DAILY PRICE = 5000");
+});
+
+
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
