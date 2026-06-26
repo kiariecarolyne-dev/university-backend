@@ -72,9 +72,9 @@ app.post("/create-checkout-session", async (req, res) => {
 
     // 🇰🇪 Kenya pricing
     if (currency === "kes") {
-      if (plan === "daily") price = 50;
-      if (plan === "weekly") price = 200;
-      if (plan === "monthly") price = 800;
+      if (plan === "daily") price = 5000;
+      if (plan === "weekly") price = 20000;
+      if (plan === "monthly") price = 80000;
     }
 
     // 🇺🇸 USD pricing
