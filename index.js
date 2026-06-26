@@ -68,6 +68,12 @@ app.post("/create-checkout-session", async (req, res) => {
   try {
     const { userId, plan, currency } = req.body;
 
+    console.log("REQUEST DATA:", {
+  userId,
+  plan,
+  currency
+});
+
     let price = 0;
 
     // 🇰🇪 Kenya pricing
