@@ -5,11 +5,17 @@ require("dotenv").config();
 const Stripe = require("stripe");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// 🧠 FIREBASE ADMIN (NEW VERSION FOR firebase-admin v14)
+// 🧠 FIREBASE ADMIN (USING RENDER ENV VARIABLES)
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 
-const serviceAccount = require("./serviceAccountKey.json");
+const serviceAccount = {
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+
+  // Fixes line breaks in Render environment variable
+  privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+};
 
 initializeApp({
   credential: cert(serviceAccount),
