@@ -8,6 +8,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 // MPESA PACKAGES
 const axios = require("axios");
 const moment = require("moment");
+const cron = require("node-cron");
 
 // FIREBASE ADMIN
 const { initializeApp, cert } = require("firebase-admin/app");
@@ -26,6 +27,7 @@ initializeApp({
 });
 
 const db = getFirestore();
+
 
 // =====================================
 // MPESA HELPERS
@@ -72,6 +74,7 @@ app.get("/", (req, res) => {
   res.send("University Universal Payment Server Running");
 });
 
+
 // =====================================
 // MPESA STK PUSH
 // =====================================
@@ -105,15 +108,15 @@ app.post("/mpesa-payment", async (req, res) => {
     );
 
     // SAVE PENDING PAYMENT
-    await db.collection("mpesa_pending").doc(
-      response.data.CheckoutRequestID
-    ).set({
-      userId,
-      plan,
-      phone,
-      amount,
-      createdAt: new Date().toISOString(),
-    });
+    await db.collection("mpesa_pending")
+      .doc(response.data.CheckoutRequestID)
+      .set({
+        userId,
+        plan,
+        phone,
+        amount,
+        createdAt: new Date().toISOString(),
+      });
 
     res.json({
       success: true,
@@ -131,6 +134,7 @@ app.post("/mpesa-payment", async (req, res) => {
     });
   }
 });
+
 
 // =====================================
 // MPESA CALLBACK
@@ -161,7 +165,6 @@ app.post("/mpesa-callback", async (req, res) => {
 
     const pendingDoc = await pendingRef.get();
 
-    // If no record exists, acknowledge Safaricom
     if (!pendingDoc.exists) {
       return res.json({
         ResultCode: 0,
@@ -172,7 +175,6 @@ app.post("/mpesa-callback", async (req, res) => {
     const pendingData = pendingDoc.data();
     const { userId, plan } = pendingData;
 
-    // Calculate premium expiry
     let premiumUntil = new Date();
 
     if (plan === "2days") {
@@ -194,8 +196,7 @@ app.post("/mpesa-callback", async (req, res) => {
     }
 
     // Activate premium
-    await db
-      .collection("users")
+    await db.collection("users")
       .doc(userId)
       .update({
         isPremium: true,
@@ -223,6 +224,7 @@ app.post("/mpesa-callback", async (req, res) => {
   }
 });
 
+
 // =====================================
 // STRIPE PAYMENT INTENT
 // =====================================
@@ -236,11 +238,12 @@ app.post("/create-payment-intent", async (req, res) => {
       });
     }
 
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: amount,
-      currency: "kes",
-      payment_method_types: ["card"],
-    });
+    const paymentIntent =
+      await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "kes",
+        payment_method_types: ["card"],
+      });
 
     res.send({
       clientSecret: paymentIntent.client_secret,
@@ -255,18 +258,13 @@ app.post("/create-payment-intent", async (req, res) => {
   }
 });
 
+
 // =====================================
 // STRIPE CHECKOUT SESSION
 // =====================================
 app.post("/create-checkout-session", async (req, res) => {
   try {
     const { userId, plan, currency } = req.body;
-
-    console.log("REQUEST DATA:", {
-      userId,
-      plan,
-      currency,
-    });
 
     let price = 0;
 
@@ -290,29 +288,31 @@ app.post("/create-checkout-session", async (req, res) => {
       });
     }
 
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "payment",
+    const session =
+      await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "payment",
 
-      line_items: [
-        {
-          price_data: {
-            currency: currency,
-            product_data: {
-              name: `University Universal ${plan} subscription`,
+        line_items: [
+          {
+            price_data: {
+              currency: currency,
+              product_data: {
+                name:
+                  `University Universal ${plan} subscription`,
+              },
+              unit_amount: price,
             },
-            unit_amount: price,
+            quantity: 1,
           },
-          quantity: 1,
-        },
-      ],
+        ],
 
-      success_url:
-        `${process.env.BASE_URL}/success?userId=${userId}&plan=${plan}`,
+        success_url:
+          `${process.env.BASE_URL}/success?userId=${userId}&plan=${plan}`,
 
-      cancel_url:
-        `${process.env.BASE_URL}/cancel`,
-    });
+        cancel_url:
+          `${process.env.BASE_URL}/cancel`,
+      });
 
     res.json({
       url: session.url,
@@ -329,6 +329,7 @@ app.post("/create-checkout-session", async (req, res) => {
     });
   }
 });
+
 
 // =====================================
 // STRIPE SUCCESS ENDPOINT
@@ -394,6 +395,7 @@ app.get("/success", async (req, res) => {
   }
 });
 
+
 // =====================================
 // CANCEL ROUTE
 // =====================================
@@ -403,6 +405,7 @@ app.get("/cancel", (req, res) => {
   );
 });
 
+
 // =====================================
 // DEBUG ROUTE
 // =====================================
@@ -411,6 +414,60 @@ app.get("/test-price", (req, res) => {
     "2 DAYS = KSh 100 | WEEKLY = KSh 250 | MONTHLY = KSh 1000"
   );
 });
+
+
+// =====================================
+// AUTO REMOVE EXPIRED PREMIUM DAILY
+// Runs every day at midnight
+// =====================================
+cron.schedule("0 0 * * *", async () => {
+  try {
+    console.log("Checking expired premium users...");
+
+    const usersSnapshot =
+      await db.collection("users").get();
+
+    const now = new Date();
+
+    for (const doc of usersSnapshot.docs) {
+      const user = doc.data();
+
+      if (
+        user.isPremium === true &&
+        user.premiumUntil
+      ) {
+        const expiryDate =
+          new Date(user.premiumUntil);
+
+        if (now > expiryDate) {
+          await db
+            .collection("users")
+            .doc(doc.id)
+            .update({
+              isPremium: false,
+              premiumUntil: null,
+            });
+
+          console.log(
+            "Premium expired for:",
+            doc.id
+          );
+        }
+      }
+    }
+
+    console.log(
+      "Premium cleanup finished."
+    );
+
+  } catch (error) {
+    console.log(
+      "Cron error:",
+      error.message
+    );
+  }
+});
+
 
 const PORT = process.env.PORT || 5000;
 
