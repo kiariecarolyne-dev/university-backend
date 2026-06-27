@@ -77,14 +77,13 @@ app.post("/create-checkout-session", async (req, res) => {
     let price = 0;
 
     // 🇰🇪 Kenya pricing
-    // Stripe uses cents/smallest currency unit
     if (currency === "kes") {
       if (plan === "2days") price = 10000;      // KSh 100
       if (plan === "weekly") price = 25000;     // KSh 250
       if (plan === "monthly") price = 100000;   // KSh 1000
     }
 
-    // 🇺🇸 USD pricing (optional equivalent)
+    // 🇺🇸 USD pricing
     if (currency === "usd") {
       if (plan === "2days") price = 100;        // $1.00
       if (plan === "weekly") price = 250;       // $2.50
@@ -114,7 +113,8 @@ app.post("/create-checkout-session", async (req, res) => {
         },
       ],
 
-      success_url: `${process.env.BASE_URL}/success?userId=${userId}`,
+      // ✅ UPDATED SUCCESS URL
+      success_url: `${process.env.BASE_URL}/success?userId=${userId}&plan=${plan}`,
       cancel_url: `${process.env.BASE_URL}/cancel`,
     });
 
