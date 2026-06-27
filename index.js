@@ -27,7 +27,6 @@ initializeApp({
 
 const db = getFirestore();
 
-
 // =====================================
 // MPESA HELPERS
 // =====================================
@@ -64,7 +63,6 @@ const generateMpesaPassword = () => {
   };
 };
 
-
 const app = express();
 
 app.use(cors());
@@ -74,7 +72,6 @@ app.get("/", (req, res) => {
   res.send("University Universal Payment Server Running");
 });
 
-
 // =====================================
 // MPESA STK PUSH
 // =====================================
@@ -83,7 +80,6 @@ app.post("/mpesa-payment", async (req, res) => {
     const { phone, amount, userId, plan } = req.body;
 
     const accessToken = await getMpesaAccessToken();
-
     const { password, timestamp } = generateMpesaPassword();
 
     const response = await axios.post(
@@ -136,6 +132,96 @@ app.post("/mpesa-payment", async (req, res) => {
   }
 });
 
+// =====================================
+// MPESA CALLBACK
+// =====================================
+app.post("/mpesa-callback", async (req, res) => {
+  try {
+    console.log(
+      "MPESA CALLBACK:",
+      JSON.stringify(req.body, null, 2)
+    );
+
+    const callback = req.body.Body.stkCallback;
+    const checkoutId = callback.CheckoutRequestID;
+    const resultCode = callback.ResultCode;
+
+    // Payment failed/cancelled
+    if (resultCode !== 0) {
+      return res.json({
+        ResultCode: 0,
+        ResultDesc: "Received",
+      });
+    }
+
+    // Find pending payment
+    const pendingRef = db
+      .collection("mpesa_pending")
+      .doc(checkoutId);
+
+    const pendingDoc = await pendingRef.get();
+
+    // If no record exists, acknowledge Safaricom
+    if (!pendingDoc.exists) {
+      return res.json({
+        ResultCode: 0,
+        ResultDesc: "Received",
+      });
+    }
+
+    const pendingData = pendingDoc.data();
+    const { userId, plan } = pendingData;
+
+    // Calculate premium expiry
+    let premiumUntil = new Date();
+
+    if (plan === "2days") {
+      premiumUntil.setDate(
+        premiumUntil.getDate() + 2
+      );
+    }
+
+    if (plan === "weekly") {
+      premiumUntil.setDate(
+        premiumUntil.getDate() + 7
+      );
+    }
+
+    if (plan === "monthly") {
+      premiumUntil.setDate(
+        premiumUntil.getDate() + 30
+      );
+    }
+
+    // Activate premium
+    await db
+      .collection("users")
+      .doc(userId)
+      .update({
+        isPremium: true,
+        premiumUntil: premiumUntil.toISOString(),
+      });
+
+    // Delete pending payment
+    await pendingRef.delete();
+
+    res.json({
+      ResultCode: 0,
+      ResultDesc: "Success",
+    });
+
+  } catch (error) {
+    console.log(
+      "CALLBACK ERROR:",
+      error.message
+    );
+
+    res.json({
+      ResultCode: 0,
+      ResultDesc: "Error handled",
+    });
+  }
+});
 
 // =====================================
 // STRIPE PAYMENT INTENT
@@ -169,7 +255,6 @@ app.post("/create-payment-intent", async (req, res) => {
   }
 });
 
-
 // =====================================
 // STRIPE CHECKOUT SESSION
 // =====================================
@@ -187,16 +272,16 @@ app.post("/create-checkout-session", async (req, res) => {
 
     // Kenya pricing
     if (currency === "kes") {
-      if (plan === "2days") price = 10000;      // KSh 100
-      if (plan === "weekly") price = 25000;     // KSh 250
-      if (plan === "monthly") price = 100000;   // KSh 1000
+      if (plan === "2days") price = 10000;
+      if (plan === "weekly") price = 25000;
+      if (plan === "monthly") price = 100000;
     }
 
     // USD pricing
     if (currency === "usd") {
-      if (plan === "2days") price = 100;        // $1.00
-      if (plan === "weekly") price = 250;       // $2.50
-      if (plan === "monthly") price = 1000;     // $10.00
+      if (plan === "2days") price = 100;
+      if (plan === "weekly") price = 250;
+      if (plan === "monthly") price = 1000;
     }
 
     if (!price) {
@@ -244,7 +329,6 @@ app.post("/create-checkout-session", async (req, res) => {
     });
   }
 });
-
 
 // =====================================
 // STRIPE SUCCESS ENDPOINT
@@ -310,7 +394,6 @@ app.get("/success", async (req, res) => {
   }
 });
 
-
 // =====================================
 // CANCEL ROUTE
 // =====================================
@@ -320,7 +403,6 @@ app.get("/cancel", (req, res) => {
   );
 });
 
-
 // =====================================
 // DEBUG ROUTE
 // =====================================
@@ -329,7 +411,6 @@ app.get("/test-price", (req, res) => {
     "2 DAYS = KSh 100 | WEEKLY = KSh 250 | MONTHLY = KSh 1000"
   );
 });
-
 
 const PORT = process.env.PORT || 5000;
 
