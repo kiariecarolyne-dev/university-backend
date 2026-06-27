@@ -5,6 +5,10 @@ require("dotenv").config();
 const Stripe = require("stripe");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
+// ✅ NEW MPESA PACKAGES
+const axios = require("axios");
+const moment = require("moment");
+
 // 🧠 FIREBASE ADMIN (USING RENDER ENV VARIABLES)
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
@@ -23,6 +27,43 @@ initializeApp({
 
 const db = getFirestore();
 
+
+// ================================
+// MPESA HELPERS
+// ================================
+
+// Get Daraja access token
+const getMpesaAccessToken = async () => {
+  const auth = Buffer.from(
+    `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
+  ).toString("base64");
+
+  const response = await axios.get(
+    "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+    {
+      headers: {
+        Authorization: `Basic ${auth}`,
+      },
+    }
+  );
+
+  return response.data.access_token;
+};
+
+// Generate password for STK push
+const generateMpesaPassword = () => {
+  const timestamp = moment().format("YYYYMMDDHHmmss");
+
+  const password = Buffer.from(
+    `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
+  ).toString("base64");
+
+  return {
+    password,
+    timestamp,
+  };
+};
+
 const app = express();
 
 app.use(cors());
@@ -30,6 +71,57 @@ app.use(express.json());
 
 app.get("/", (req, res) => {
   res.send("University Universal Payment Server Running");
+});
+
+
+// ================================
+// MPESA STK PUSH
+// ================================
+app.post("/mpesa-payment", async (req, res) => {
+  try {
+    const { phone, amount } = req.body;
+
+    const accessToken = await getMpesaAccessToken();
+
+    const { password, timestamp } = generateMpesaPassword();
+
+    const response = await axios.post(
+      "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+      {
+        BusinessShortCode: process.env.MPESA_SHORTCODE,
+        Password: password,
+        Timestamp: timestamp,
+        TransactionType: "CustomerPayBillOnline",
+        Amount: amount,
+        PartyA: phone,
+        PartyB: process.env.MPESA_SHORTCODE,
+        PhoneNumber: phone,
+        CallBackURL: process.env.MPESA_CALLBACK_URL,
+        AccountReference: "UniversityUniversal",
+        TransactionDesc: "Premium Subscription Payment",
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    res.json({
+      success: true,
+      data: response.data,
+    });
+
+  } catch (error) {
+    console.log(
+      "MPESA ERROR:",
+      error.response?.data || error.message
+    );
+
+    res.status(500).json({
+      error: "M-Pesa payment failed",
+    });
+  }
 });
 
 
@@ -63,7 +155,7 @@ app.post("/create-payment-intent", async (req, res) => {
 });
 
 
-// 🧱 STEP 19A.5 — CHECKOUT SESSION (KES + USD SUPPORT)
+// 🧱 CHECKOUT SESSION (STRIPE)
 app.post("/create-checkout-session", async (req, res) => {
   try {
     const { userId, plan, currency } = req.body;
@@ -78,16 +170,16 @@ app.post("/create-checkout-session", async (req, res) => {
 
     // 🇰🇪 Kenya pricing
     if (currency === "kes") {
-      if (plan === "2days") price = 10000;      // KSh 100
-      if (plan === "weekly") price = 25000;     // KSh 250
-      if (plan === "monthly") price = 100000;   // KSh 1000
+      if (plan === "2days") price = 10000;
+      if (plan === "weekly") price = 25000;
+      if (plan === "monthly") price = 100000;
     }
 
     // 🇺🇸 USD pricing
     if (currency === "usd") {
-      if (plan === "2days") price = 100;        // $1.00
-      if (plan === "weekly") price = 250;       // $2.50
-      if (plan === "monthly") price = 1000;     // $10.00
+      if (plan === "2days") price = 100;
+      if (plan === "weekly") price = 250;
+      if (plan === "monthly") price = 1000;
     }
 
     if (!price) {
@@ -113,7 +205,6 @@ app.post("/create-checkout-session", async (req, res) => {
         },
       ],
 
-      // ✅ Sends userId + plan
       success_url: `${process.env.BASE_URL}/success?userId=${userId}&plan=${plan}`,
       cancel_url: `${process.env.BASE_URL}/cancel`,
     });
@@ -131,7 +222,7 @@ app.post("/create-checkout-session", async (req, res) => {
 });
 
 
-// 🧱 STEP 20B — SUCCESS ENDPOINT WITH EXPIRY LOGIC
+// 🧱 SUCCESS ENDPOINT
 app.get("/success", async (req, res) => {
   try {
     const { userId, plan } = req.query;
@@ -143,11 +234,10 @@ app.get("/success", async (req, res) => {
     const userRef = db.collection("users").doc(userId);
     const userDoc = await userRef.get();
 
-    if (!userDoc.exists) {
+    if (!userDoc.exists()) {
       return res.status(404).send("User not found");
     }
 
-    // Calculate expiry date
     let premiumUntil = new Date();
 
     if (plan === "2days") {
@@ -176,17 +266,16 @@ app.get("/success", async (req, res) => {
 });
 
 
-// 🧱 CANCEL ROUTE
+// CANCEL ROUTE
 app.get("/cancel", (req, res) => {
   res.send("Payment cancelled. You were not charged.");
 });
 
 
-// 🧪 DEBUG ROUTE
+// DEBUG ROUTE
 app.get("/test-price", (req, res) => {
   res.send("2 DAYS = KSh 100 | WEEKLY = KSh 250 | MONTHLY = KSh 1000");
 });
-
 
 const PORT = process.env.PORT || 5000;
 
