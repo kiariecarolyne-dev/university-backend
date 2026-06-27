@@ -113,7 +113,7 @@ app.post("/create-checkout-session", async (req, res) => {
         },
       ],
 
-      // ✅ UPDATED SUCCESS URL
+      // ✅ Sends userId + plan
       success_url: `${process.env.BASE_URL}/success?userId=${userId}&plan=${plan}`,
       cancel_url: `${process.env.BASE_URL}/cancel`,
     });
@@ -131,13 +131,13 @@ app.post("/create-checkout-session", async (req, res) => {
 });
 
 
-// 🧱 STEP 19A.7 — SUCCESS ENDPOINT
+// 🧱 STEP 20B — SUCCESS ENDPOINT WITH EXPIRY LOGIC
 app.get("/success", async (req, res) => {
   try {
-    const { userId } = req.query;
+    const { userId, plan } = req.query;
 
-    if (!userId) {
-      return res.status(400).send("Missing userId");
+    if (!userId || !plan) {
+      return res.status(400).send("Missing userId or plan");
     }
 
     const userRef = db.collection("users").doc(userId);
@@ -147,11 +147,27 @@ app.get("/success", async (req, res) => {
       return res.status(404).send("User not found");
     }
 
+    // Calculate expiry date
+    let premiumUntil = new Date();
+
+    if (plan === "2days") {
+      premiumUntil.setDate(premiumUntil.getDate() + 2);
+    }
+
+    if (plan === "weekly") {
+      premiumUntil.setDate(premiumUntil.getDate() + 7);
+    }
+
+    if (plan === "monthly") {
+      premiumUntil.setDate(premiumUntil.getDate() + 30);
+    }
+
     await userRef.update({
       isPremium: true,
+      premiumUntil: premiumUntil.toISOString(),
     });
 
-    res.send("Payment successful. You are now Premium.");
+    res.send("Payment successful. Premium activated.");
 
   } catch (error) {
     console.error(error);
@@ -166,7 +182,7 @@ app.get("/cancel", (req, res) => {
 });
 
 
-// 🧪 DEBUG ROUTE (TEMPORARY TEST)
+// 🧪 DEBUG ROUTE
 app.get("/test-price", (req, res) => {
   res.send("2 DAYS = KSh 100 | WEEKLY = KSh 250 | MONTHLY = KSh 1000");
 });
