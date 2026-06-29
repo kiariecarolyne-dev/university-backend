@@ -268,19 +268,20 @@ app.post("/create-checkout-session", async (req, res) => {
 
     let price = 0;
 
-    // Kenya pricing
-    if (currency === "kes") {
-      if (plan === "2days") price = 10000;
-      if (plan === "weekly") price = 25000;
-      if (plan === "monthly") price = 100000;
-    }
+   // Kenya pricing
+if (currency === "kes") {
+  // Stripe uses cents/smallest unit
+  if (plan === "2days") price = 5000;      // KSh 50
+  if (plan === "weekly") price = 15000;    // KSh 150
+  if (plan === "monthly") price = 50000;   // KSh 500
+}
 
-    // USD pricing
-    if (currency === "usd") {
-      if (plan === "2days") price = 100;
-      if (plan === "weekly") price = 250;
-      if (plan === "monthly") price = 1000;
-    }
+// USD pricing
+if (currency === "usd") {
+  if (plan === "2days") price = 50;        // $0.50
+  if (plan === "weekly") price = 150;      // $1.50
+  if (plan === "monthly") price = 500;     // $5.00
+}
 
     if (!price) {
       return res.status(400).json({
@@ -411,7 +412,7 @@ app.get("/cancel", (req, res) => {
 // =====================================
 app.get("/test-price", (req, res) => {
   res.send(
-    "2 DAYS = KSh 100 | WEEKLY = KSh 250 | MONTHLY = KSh 1000"
+    "2 DAYS = KSh 50 | WEEKLY = KSh 150 | MONTHLY = KSh 500"
   );
 });
 
