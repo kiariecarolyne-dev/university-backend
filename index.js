@@ -5,20 +5,20 @@ require("dotenv").config();
 const Stripe = require("stripe");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// MPESA PACKAGES
 const axios = require("axios");
 const moment = require("moment");
 const cron = require("node-cron");
 
-// FIREBASE ADMIN
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 
+
+// ====================================
+// FIREBASE INIT
+// ====================================
 const serviceAccount = {
   projectId: process.env.FIREBASE_PROJECT_ID,
   clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-
-  // Fix Render line breaks
   privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
 };
 
@@ -28,12 +28,210 @@ initializeApp({
 
 const db = getFirestore();
 
+const app = express();
 
-// =====================================
-// MPESA HELPERS
-// =====================================
+app.use(cors());
+app.use(express.json());
 
-// Get Daraja access token
+
+// ====================================
+// ACTIVATE PREMIUM  (FIXED)
+// ====================================
+const activatePremium = async (userId, plan) => {
+  try {
+    console.log("ACTIVATING PREMIUM...");
+    console.log("USER ID:", userId);
+    console.log("PLAN:", plan);
+
+    let premiumUntil = new Date();
+
+    if (plan === "2days") {
+      premiumUntil.setDate(premiumUntil.getDate() + 2);
+    }
+
+    if (plan === "weekly") {
+      premiumUntil.setDate(premiumUntil.getDate() + 7);
+    }
+
+    if (plan === "monthly") {
+      premiumUntil.setMonth(premiumUntil.getMonth() + 1);
+    }
+
+    console.log("WRITING TO FIRESTORE...");
+
+    await db.collection("users").doc(userId).set(
+      {
+        isPremium: true,
+        premiumPlan: plan,
+        premiumUntil: premiumUntil.toISOString(),
+      },
+      { merge: true }
+    );
+
+    console.log("FIRESTORE UPDATED SUCCESSFULLY");
+    console.log("PREMIUM ACTIVATED SUCCESSFULLY");
+
+  } catch (error) {
+    console.log("ACTIVATE PREMIUM ERROR:", error.message);
+    throw error;
+  }
+};
+
+
+// ====================================
+// HOME
+// ====================================
+app.get("/", (req, res) => {
+  res.send("University Universal Payment Server Running");
+});
+
+
+// ====================================
+// MANUAL CONFIRM PAYMENT
+// ====================================
+app.post("/confirm-payment", async (req, res) => {
+  try {
+    const { userId, plan } = req.body;
+
+    console.log("CONFIRM PAYMENT HIT");
+    console.log("USER:", userId);
+    console.log("PLAN:", plan);
+
+    if (!userId || !plan) {
+      return res.status(400).json({
+        error: "Missing userId or plan",
+      });
+    }
+
+    await activatePremium(userId, plan);
+
+    res.json({ success: true });
+
+  } catch (error) {
+    console.log("CONFIRM PAYMENT ERROR:", error.message);
+
+    res.status(500).json({
+      error: "Payment confirmation failed",
+    });
+  }
+});
+
+
+// ====================================
+// STRIPE CHECKOUT
+// ====================================
+app.post("/create-checkout-session", async (req, res) => {
+  try {
+    const { userId, plan, currency } = req.body;
+
+    console.log("CREATE CHECKOUT SESSION");
+    console.log("USER:", userId);
+    console.log("PLAN:", plan);
+    console.log("CURRENCY:", currency);
+
+    let price = 0;
+
+    if (currency === "usd") {
+      if (plan === "2days") price = 50;
+      if (plan === "weekly") price = 150;
+      if (plan === "monthly") price = 500;
+    }
+
+    if (currency === "kes") {
+      if (plan === "2days") price = 5000;
+      if (plan === "weekly") price = 15000;
+      if (plan === "monthly") price = 50000;
+    }
+
+    if (!price) {
+      return res.status(400).json({
+        error: "Invalid plan or currency",
+      });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
+
+      line_items: [
+        {
+          price_data: {
+            currency: currency,
+            product_data: {
+              name: `University Universal ${plan}`,
+            },
+            unit_amount: price,
+          },
+          quantity: 1,
+        },
+      ],
+
+      success_url:
+        `${process.env.BASE_URL}/success?userId=${userId}&plan=${plan}`,
+
+      cancel_url:
+        `${process.env.BASE_URL}/cancel`,
+    });
+
+    console.log("STRIPE SESSION CREATED");
+    console.log(session.url);
+
+    res.json({
+      url: session.url,
+    });
+
+  } catch (error) {
+    console.log("STRIPE ERROR:", error.message);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+});
+
+
+// ====================================
+// STRIPE SUCCESS ROUTE
+// ====================================
+app.get("/success", async (req, res) => {
+  try {
+    const { userId, plan } = req.query;
+
+    console.log("SUCCESS ROUTE HIT");
+    console.log("USER:", userId);
+    console.log("PLAN:", plan);
+
+    if (!userId || !plan) {
+      console.log("MISSING DATA");
+      return res.status(400).send("Missing userId or plan");
+    }
+
+    await activatePremium(userId, plan);
+
+    console.log("SUCCESS ROUTE COMPLETE");
+
+    res.send("Payment successful. Premium activated.");
+
+  } catch (error) {
+    console.log("SUCCESS ERROR:", error.message);
+
+    res.status(500).send("Something went wrong");
+  }
+});
+
+
+// ====================================
+// CANCEL
+// ====================================
+app.get("/cancel", (req, res) => {
+  console.log("PAYMENT CANCELLED");
+  res.send("Payment cancelled.");
+});
+
+
+// ====================================
+// MPESA TOKEN
+// ====================================
 const getMpesaAccessToken = async () => {
   const auth = Buffer.from(
     `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
@@ -51,7 +249,10 @@ const getMpesaAccessToken = async () => {
   return response.data.access_token;
 };
 
-// Generate MPESA password
+
+// ====================================
+// MPESA PASSWORD
+// ====================================
 const generateMpesaPassword = () => {
   const timestamp = moment().format("YYYYMMDDHHmmss");
 
@@ -59,28 +260,18 @@ const generateMpesaPassword = () => {
     `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
   ).toString("base64");
 
-  return {
-    password,
-    timestamp,
-  };
+  return { password, timestamp };
 };
 
-const app = express();
 
-app.use(cors());
-app.use(express.json());
-
-app.get("/", (req, res) => {
-  res.send("University Universal Payment Server Running");
-});
-
-
-// =====================================
-// MPESA STK PUSH
-// =====================================
+// ====================================
+// MPESA PAYMENT
+// ====================================
 app.post("/mpesa-payment", async (req, res) => {
   try {
     const { phone, amount, userId, plan } = req.body;
+
+    console.log("MPESA PAYMENT START");
 
     const accessToken = await getMpesaAccessToken();
     const { password, timestamp } = generateMpesaPassword();
@@ -98,7 +289,7 @@ app.post("/mpesa-payment", async (req, res) => {
         PhoneNumber: phone,
         CallBackURL: process.env.MPESA_CALLBACK_URL,
         AccountReference: "UniversityUniversal",
-        TransactionDesc: "Premium Subscription Payment",
+        TransactionDesc: "Premium Subscription",
       },
       {
         headers: {
@@ -107,7 +298,6 @@ app.post("/mpesa-payment", async (req, res) => {
       }
     );
 
-    // SAVE PENDING PAYMENT
     await db.collection("mpesa_pending")
       .doc(response.data.CheckoutRequestID)
       .set({
@@ -124,10 +314,7 @@ app.post("/mpesa-payment", async (req, res) => {
     });
 
   } catch (error) {
-    console.log(
-      "MPESA ERROR:",
-      error.response?.data || error.message
-    );
+    console.log("MPESA ERROR:", error.response?.data || error.message);
 
     res.status(500).json({
       error: "M-Pesa payment failed",
@@ -136,21 +323,17 @@ app.post("/mpesa-payment", async (req, res) => {
 });
 
 
-// =====================================
+// ====================================
 // MPESA CALLBACK
-// =====================================
+// ====================================
 app.post("/mpesa-callback", async (req, res) => {
   try {
-    console.log(
-      "MPESA CALLBACK:",
-      JSON.stringify(req.body, null, 2)
-    );
-
     const callback = req.body.Body.stkCallback;
     const checkoutId = callback.CheckoutRequestID;
     const resultCode = callback.ResultCode;
 
-    // Payment failed/cancelled
+    console.log("MPESA CALLBACK HIT");
+
     if (resultCode !== 0) {
       return res.json({
         ResultCode: 0,
@@ -158,11 +341,7 @@ app.post("/mpesa-callback", async (req, res) => {
       });
     }
 
-    // Find pending payment
-    const pendingRef = db
-      .collection("mpesa_pending")
-      .doc(checkoutId);
-
+    const pendingRef = db.collection("mpesa_pending").doc(checkoutId);
     const pendingDoc = await pendingRef.get();
 
     if (!pendingDoc.exists) {
@@ -172,38 +351,9 @@ app.post("/mpesa-callback", async (req, res) => {
       });
     }
 
-    const pendingData = pendingDoc.data();
-    const { userId, plan } = pendingData;
+    const { userId, plan } = pendingDoc.data();
 
-    let premiumUntil = new Date();
-
-    if (plan === "2days") {
-      premiumUntil.setDate(
-        premiumUntil.getDate() + 2
-      );
-    }
-
-    if (plan === "weekly") {
-      premiumUntil.setDate(
-        premiumUntil.getDate() + 7
-      );
-    }
-
-    if (plan === "monthly") {
-      premiumUntil.setDate(
-        premiumUntil.getDate() + 30
-      );
-    }
-
-    // Activate premium
-    await db.collection("users")
-      .doc(userId)
-      .update({
-        isPremium: true,
-        premiumUntil: premiumUntil.toISOString(),
-      });
-
-    // Delete pending payment
+    await activatePremium(userId, plan);
     await pendingRef.delete();
 
     res.json({
@@ -212,10 +362,7 @@ app.post("/mpesa-callback", async (req, res) => {
     });
 
   } catch (error) {
-    console.log(
-      "CALLBACK ERROR:",
-      error.message
-    );
+    console.log("CALLBACK ERROR:", error.message);
 
     res.json({
       ResultCode: 0,
@@ -225,256 +372,45 @@ app.post("/mpesa-callback", async (req, res) => {
 });
 
 
-// =====================================
-// STRIPE PAYMENT INTENT
-// =====================================
-app.post("/create-payment-intent", async (req, res) => {
-  try {
-    const { amount } = req.body;
-
-    if (!amount) {
-      return res.status(400).json({
-        error: "Amount is required",
-      });
-    }
-
-    const paymentIntent =
-      await stripe.paymentIntents.create({
-        amount: amount,
-        currency: "kes",
-        payment_method_types: ["card"],
-      });
-
-    res.send({
-      clientSecret: paymentIntent.client_secret,
-    });
-
-  } catch (error) {
-    console.log("Stripe error:", error.message);
-
-    res.status(500).json({
-      error: error.message,
-    });
-  }
-});
-
-
-// =====================================
-// STRIPE CHECKOUT SESSION
-// =====================================
-app.post("/create-checkout-session", async (req, res) => {
-  try {
-    const { userId, plan, currency } = req.body;
-
-    let price = 0;
-
-   // Kenya pricing
-if (currency === "kes") {
-  // Stripe uses cents/smallest unit
-  if (plan === "2days") price = 5000;      // KSh 50
-  if (plan === "weekly") price = 15000;    // KSh 150
-  if (plan === "monthly") price = 50000;   // KSh 500
-}
-
-// USD pricing
-if (currency === "usd") {
-  if (plan === "2days") price = 50;        // $0.50
-  if (plan === "weekly") price = 150;      // $1.50
-  if (plan === "monthly") price = 500;     // $5.00
-}
-
-    if (!price) {
-      return res.status(400).json({
-        error: "Invalid plan or currency",
-      });
-    }
-
-    const session =
-      await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        mode: "payment",
-
-        line_items: [
-          {
-            price_data: {
-              currency: currency,
-              product_data: {
-                name:
-                  `University Universal ${plan} subscription`,
-              },
-              unit_amount: price,
-            },
-            quantity: 1,
-          },
-        ],
-
-        success_url:
-          `${process.env.BASE_URL}/success?userId=${userId}&plan=${plan}`,
-
-        cancel_url:
-          `${process.env.BASE_URL}/cancel`,
-      });
-
-    res.json({
-      url: session.url,
-    });
-
-  } catch (error) {
-    console.log(
-      "Checkout error:",
-      error.message
-    );
-
-    res.status(500).json({
-      error: error.message,
-    });
-  }
-});
-
-
-// =====================================
-// STRIPE SUCCESS ENDPOINT
-// =====================================
-app.get("/success", async (req, res) => {
-  try {
-    const { userId, plan } = req.query;
-
-    if (!userId || !plan) {
-      return res.status(400).send(
-        "Missing userId or plan"
-      );
-    }
-
-    const userRef =
-      db.collection("users").doc(userId);
-
-    const userDoc =
-      await userRef.get();
-
-    if (!userDoc.exists) {
-      return res.status(404).send(
-        "User not found"
-      );
-    }
-
-    let premiumUntil = new Date();
-
-    if (plan === "2days") {
-      premiumUntil.setDate(
-        premiumUntil.getDate() + 2
-      );
-    }
-
-    if (plan === "weekly") {
-      premiumUntil.setDate(
-        premiumUntil.getDate() + 7
-      );
-    }
-
-    if (plan === "monthly") {
-      premiumUntil.setDate(
-        premiumUntil.getDate() + 30
-      );
-    }
-
-    await userRef.update({
-      isPremium: true,
-      premiumUntil:
-        premiumUntil.toISOString(),
-    });
-
-    res.send(
-      "Payment successful. Premium activated."
-    );
-
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).send(
-      "Something went wrong"
-    );
-  }
-});
-
-
-// =====================================
-// CANCEL ROUTE
-// =====================================
-app.get("/cancel", (req, res) => {
-  res.send(
-    "Payment cancelled. You were not charged."
-  );
-});
-
-
-// =====================================
-// DEBUG ROUTE
-// =====================================
-app.get("/test-price", (req, res) => {
-  res.send(
-    "2 DAYS = KSh 50 | WEEKLY = KSh 150 | MONTHLY = KSh 500"
-  );
-});
-
-
-// =====================================
-// AUTO REMOVE EXPIRED PREMIUM DAILY
-// Runs every day at midnight
-// =====================================
+// ====================================
+// EXPIRE PREMIUM DAILY (FIXED)
+// ====================================
 cron.schedule("0 0 * * *", async () => {
   try {
-    console.log("Checking expired premium users...");
-
-    const usersSnapshot =
-      await db.collection("users").get();
-
+    const users = await db.collection("users").get();
     const now = new Date();
 
-    for (const doc of usersSnapshot.docs) {
+    for (const doc of users.docs) {
       const user = doc.data();
 
-      if (
-        user.isPremium === true &&
-        user.premiumUntil
-      ) {
-        const expiryDate =
-          new Date(user.premiumUntil);
+      if (user.isPremium && user.premiumUntil) {
+        const expiry = new Date(user.premiumUntil);
 
-        if (now > expiryDate) {
-          await db
-            .collection("users")
-            .doc(doc.id)
-            .update({
+        if (now > expiry) {
+          await db.collection("users").doc(doc.id).set(
+            {
               isPremium: false,
               premiumUntil: null,
-            });
-
-          console.log(
-            "Premium expired for:",
-            doc.id
+            },
+            { merge: true }
           );
         }
       }
     }
 
-    console.log(
-      "Premium cleanup finished."
-    );
+    console.log("PREMIUM CLEANUP DONE");
 
   } catch (error) {
-    console.log(
-      "Cron error:",
-      error.message
-    );
+    console.log("CRON ERROR:", error.message);
   }
 });
 
 
+// ====================================
+// START SERVER
+// ====================================
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(
-    "Server running on port",
-    PORT
-  );
+  console.log("SERVER RUNNING ON PORT", PORT);
 });
