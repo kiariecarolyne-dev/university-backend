@@ -230,15 +230,42 @@ app.get("/cancel", (req, res) => {
 
 
 // ====================================
-// MPESA TOKEN
+// MPESA TOKEN (HARD DEBUG VERSION)
 // ====================================
 const getMpesaAccessToken = async () => {
   try {
+    console.log("====================================");
+    console.log("===== MPESA ENV DEBUG =====");
+
+    // CHECK IF ENV VARIABLES EXIST
+    console.log(
+      "MPESA_CONSUMER_KEY EXISTS:",
+      !!process.env.MPESA_CONSUMER_KEY
+    );
+
+    console.log(
+      "MPESA_CONSUMER_SECRET EXISTS:",
+      !!process.env.MPESA_CONSUMER_SECRET
+    );
+
+    // CHECK LENGTHS (helps detect broken .env)
+    console.log(
+      "MPESA_CONSUMER_KEY LENGTH:",
+      process.env.MPESA_CONSUMER_KEY?.length
+    );
+
+    console.log(
+      "MPESA_CONSUMER_SECRET LENGTH:",
+      process.env.MPESA_CONSUMER_SECRET?.length
+    );
+
     console.log("REQUESTING MPESA ACCESS TOKEN...");
 
     const auth = Buffer.from(
       `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
     ).toString("base64");
+
+    console.log("AUTH GENERATED SUCCESSFULLY");
 
     const response = await axios.get(
       "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
@@ -250,15 +277,19 @@ const getMpesaAccessToken = async () => {
     );
 
     console.log("TOKEN RECEIVED SUCCESSFULLY");
+    console.log("ACCESS TOKEN:", response.data.access_token);
 
     return response.data.access_token;
 
   } catch (error) {
-    console.log("TOKEN ERROR:");
+    console.log("====================================");
+    console.log("TOKEN ERROR OCCURRED");
 
     if (error.response) {
+      console.log("SAFARICOM TOKEN ERROR RESPONSE:");
       console.log(error.response.data);
     } else {
+      console.log("ERROR MESSAGE:");
       console.log(error.message);
     }
 
