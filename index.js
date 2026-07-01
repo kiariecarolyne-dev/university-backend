@@ -233,20 +233,37 @@ app.get("/cancel", (req, res) => {
 // MPESA TOKEN
 // ====================================
 const getMpesaAccessToken = async () => {
-  const auth = Buffer.from(
-    `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
-  ).toString("base64");
+  try {
+    console.log("REQUESTING MPESA ACCESS TOKEN...");
 
-  const response = await axios.get(
-    "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
-    {
-      headers: {
-        Authorization: `Basic ${auth}`,
-      },
+    const auth = Buffer.from(
+      `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
+    ).toString("base64");
+
+    const response = await axios.get(
+      "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+      {
+        headers: {
+          Authorization: `Basic ${auth}`,
+        },
+      }
+    );
+
+    console.log("TOKEN RECEIVED SUCCESSFULLY");
+
+    return response.data.access_token;
+
+  } catch (error) {
+    console.log("TOKEN ERROR:");
+
+    if (error.response) {
+      console.log(error.response.data);
+    } else {
+      console.log(error.message);
     }
-  );
 
-  return response.data.access_token;
+    throw error;
+  }
 };
 
 
@@ -265,16 +282,43 @@ const generateMpesaPassword = () => {
 
 
 // ====================================
-// MPESA PAYMENT
+// MPESA PAYMENT (DEBUG VERSION)
 // ====================================
 app.post("/mpesa-payment", async (req, res) => {
+  console.log("====================================");
+  console.log("MPESA ROUTE HIT");
+
   try {
     const { phone, amount, userId, plan } = req.body;
 
-    console.log("MPESA PAYMENT START");
+    // LOG EVERYTHING COMING FROM APP
+    console.log("BODY:", req.body);
+    console.log("PHONE:", phone);
+    console.log("AMOUNT:", amount);
+    console.log("USER ID:", userId);
+    console.log("PLAN:", plan);
+
+    // VALIDATION
+    if (!phone || !amount || !userId || !plan) {
+      console.log("MISSING REQUIRED FIELDS");
+
+      return res.status(400).json({
+        error: "Missing phone, amount, userId or plan",
+      });
+    }
+
+    console.log("GETTING MPESA ACCESS TOKEN...");
 
     const accessToken = await getMpesaAccessToken();
+
+    console.log("ACCESS TOKEN SUCCESS");
+
     const { password, timestamp } = generateMpesaPassword();
+
+    console.log("PASSWORD GENERATED");
+    console.log("TIMESTAMP:", timestamp);
+
+    console.log("SENDING STK PUSH TO SAFARICOM...");
 
     const response = await axios.post(
       "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
@@ -298,7 +342,13 @@ app.post("/mpesa-payment", async (req, res) => {
       }
     );
 
-    await db.collection("mpesa_pending")
+    console.log("STK PUSH RESPONSE:");
+    console.log(response.data);
+
+    console.log("SAVING PENDING PAYMENT...");
+
+    await db
+      .collection("mpesa_pending")
       .doc(response.data.CheckoutRequestID)
       .set({
         userId,
@@ -308,16 +358,27 @@ app.post("/mpesa-payment", async (req, res) => {
         createdAt: new Date().toISOString(),
       });
 
-    res.json({
+    console.log("PENDING PAYMENT SAVED SUCCESSFULLY");
+
+    return res.json({
       success: true,
       data: response.data,
     });
 
   } catch (error) {
-    console.log("MPESA ERROR:", error.response?.data || error.message);
+    console.log("====================================");
+    console.log("MPESA ERROR OCCURRED");
 
-    res.status(500).json({
+    // FULL ERROR LOG
+    if (error.response) {
+      console.log("SAFARICOM ERROR:", error.response.data);
+    } else {
+      console.log("ERROR MESSAGE:", error.message);
+    }
+
+    return res.status(500).json({
       error: "M-Pesa payment failed",
+      details: error.response?.data || error.message,
     });
   }
 });
