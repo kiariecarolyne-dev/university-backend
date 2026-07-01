@@ -397,23 +397,33 @@ app.post("/mpesa-payment", async (req, res) => {
     });
 
   } catch (error) {
-    console.log("====================================");
-    console.log("MPESA ERROR OCCURRED");
+  console.log("====================================");
+  console.log("MPESA ERROR OCCURRED");
+  console.log("FULL ERROR OBJECT:");
 
-    // FULL ERROR LOG
-    if (error.response) {
-      console.log("SAFARICOM ERROR:", error.response.data);
-    } else {
-      console.log("ERROR MESSAGE:", error.message);
-    }
+  if (error.response) {
+    console.log("STATUS:", error.response.status);
 
-    return res.status(500).json({
-      error: "M-Pesa payment failed",
-      details: error.response?.data || error.message,
-    });
+    console.log(
+      "DATA:",
+      JSON.stringify(error.response.data, null, 2)
+    );
+
+    console.log(
+      "HEADERS:",
+      JSON.stringify(error.response.headers, null, 2)
+    );
+  } else {
+    console.log("MESSAGE:", error.message);
   }
-});
 
+  return res.status(500).json({
+    error: "M-Pesa payment failed",
+    status: error.response?.status,
+    details: error.response?.data || error.message,
+  });
+}
+});
 
 // ====================================
 // MPESA CALLBACK
