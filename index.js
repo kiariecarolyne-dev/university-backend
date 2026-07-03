@@ -12,6 +12,10 @@ const cron = require("node-cron");
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 
+const Busboy = require("busboy");
+const { v4: uuidv4 } = require("uuid");
+const { getStorage } = require("firebase-admin/storage");
+
 
 // ====================================
 // FIREBASE INIT
@@ -24,7 +28,11 @@ const serviceAccount = {
 
 initializeApp({
   credential: cert(serviceAccount),
+  storageBucket: "university-universal-e6787.firebasestorage.app",
 });
+
+const db = getFirestore();
+const bucket = getStorage().bucket();
 
 const db = getFirestore();
 
@@ -511,35 +519,112 @@ cron.schedule("0 0 * * *", async () => {
 // ====================================
 // UPLOAD NOTES
 // ====================================
-app.post("/upload-note", async (req, res) => {
+app.post("/upload-note", (req, res) => {
   try {
-    const {
-      userId,
-      email,
-      ownerName,
-      title,
-      course,
-      university,
-      description,
-      fileName,
-    } = req.body;
+    const busboy = Busboy({ headers: req.headers });
 
-    console.log("UPLOAD NOTE ROUTE HIT");
-    console.log(req.body);
+    let uploadData = null;
+    let fields = {};
 
-    // VALIDATION
-    if (
-      !userId ||
-      !email ||
-      !title ||
-      !course ||
-      !university ||
-      !description
-    ) {
-      return res.status(400).json({
-        error: "Missing required fields",
+    busboy.on("field", (key, value) => {
+      fields[key] = value;
+    });
+
+    busboy.on("file", (fieldname, file, info) => {
+      const { filename, mimeType } = info;
+
+      const fileBuffer = [];
+      
+      file.on("data", (data) => {
+        fileBuffer.push(data);
       });
-    }
+
+      file.on("end", () => {
+        uploadData = {
+          file: Buffer.concat(fileBuffer),
+          filename,
+          mimeType,
+        };
+      });
+    });
+
+    busboy.on("finish", async () => {
+      try {
+        if (!uploadData) {
+          return res.status(400).json({
+            error: "No file uploaded",
+          });
+        }
+
+        const fileName = `notes/${uuidv4()}-${uploadData.filename}`;
+
+        const fileUpload = bucket.file(fileName);
+
+        await fileUpload.save(uploadData.file, {
+          metadata: {
+            contentType: uploadData.mimeType,
+          },
+        });
+
+        const [fileUrl] = await fileUpload.getSignedUrl({
+          action: "read",
+          expires: "03-01-2030",
+        });
+
+        await db.collection("notes").add({
+          userId: fields.userId,
+          email: fields.email,
+          ownerName: fields.ownerName,
+
+          title: fields.title,
+          course: fields.course,
+          university: fields.university,
+          description: fields.description,
+
+          fileUrl,
+          fileName: uploadData.filename,
+
+          createdAt: new Date().toISOString(),
+        });
+
+        return res.json({
+          success: true,
+          fileUrl,
+        });
+
+      } catch (err) {
+        console.log("UPLOAD ERROR:", err.message);
+
+        return res.status(500).json({
+          error: "Upload failed",
+        });
+      }
+    });
+
+    req.pipe(busboy);
+
+  } catch (error) {
+    console.log("ROUTE ERROR:", error.message);
+
+    return res.status(500).json({
+      error: "Server error",
+    });
+  }
+});
+
+    // VALIDATION (BUSBOY VERSION)
+if (
+  !fields.userId ||
+  !fields.email ||
+  !fields.title ||
+  !fields.course ||
+  !fields.university ||
+  !fields.description
+) {
+  return res.status(400).json({
+    error: "Missing required fields",
+  });
+}
 
     // SAVE TO FIRESTORE
     await db.collection("notes").add({
