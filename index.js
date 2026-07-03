@@ -16,8 +16,6 @@ const { getStorage } = require("firebase-admin/storage");
 const { v4: uuidv4 } = require("uuid");
 
 const multer = require("multer");
-const os = require("os");
-const path = require("path");
 
 
 // ====================================
@@ -535,6 +533,8 @@ cron.schedule("0 0 * * *", async () => {
 app.post("/upload-note", upload.single("file"), async (req, res) => {
   try {
     console.log("UPLOAD NOTE ROUTE HIT");
+    console.log("BODY:", req.body);
+console.log("FILE:", req.file?.originalname);
 
     const {
       userId,
@@ -595,25 +595,27 @@ app.post("/upload-note", upload.single("file"), async (req, res) => {
 
     // SAVE TO FIRESTORE
     await db.collection("notes").add({
-      userId,
-      email,
-      ownerName: ownerName || "Unknown Student",
+  userId,
+  email,
+  ownerName: ownerName || "Unknown Student",
 
-      title,
-      course,
-      university,
-      description,
+  title,
+  course,
+  university,
+  description,
 
-      fileName: fileName || null,
+  fileName: req.file.originalname,
+  fileUrl: fileUrl,
 
-      createdAt: new Date().toISOString(),
-    });
+  createdAt: new Date().toISOString(),
+});
 
     console.log("NOTE SAVED SUCCESSFULLY");
 
     return res.json({
-      success: true,
-    });
+  success: true,
+  fileUrl,
+});
 
   } catch (error) {
     console.log("UPLOAD NOTE ERROR:", error.message);
