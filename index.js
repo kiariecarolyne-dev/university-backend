@@ -11,10 +11,24 @@ const cron = require("node-cron");
 
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
-
-const Busboy = require("busboy");
-const { v4: uuidv4 } = require("uuid");
 const { getStorage } = require("firebase-admin/storage");
+
+const { v4: uuidv4 } = require("uuid");
+
+const multer = require("multer");
+const os = require("os");
+const path = require("path");
+
+
+// ====================================
+// MULTER CONFIG
+// ====================================
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+  },
+});
 
 
 // ====================================
@@ -34,7 +48,6 @@ initializeApp({
 const db = getFirestore();
 const bucket = getStorage().bucket();
 
-const db = getFirestore();
 
 const app = express();
 
@@ -519,112 +532,66 @@ cron.schedule("0 0 * * *", async () => {
 // ====================================
 // UPLOAD NOTES
 // ====================================
-app.post("/upload-note", (req, res) => {
+app.post("/upload-note", upload.single("file"), async (req, res) => {
   try {
-    const busboy = Busboy({ headers: req.headers });
+    console.log("UPLOAD NOTE ROUTE HIT");
 
-    let uploadData = null;
-    let fields = {};
+    const {
+      userId,
+      email,
+      ownerName,
+      title,
+      course,
+      university,
+      description,
+    } = req.body;
 
-    busboy.on("field", (key, value) => {
-      fields[key] = value;
-    });
-
-    busboy.on("file", (fieldname, file, info) => {
-      const { filename, mimeType } = info;
-
-      const fileBuffer = [];
-      
-      file.on("data", (data) => {
-        fileBuffer.push(data);
+    // VALIDATION
+    if (
+      !userId ||
+      !email ||
+      !title ||
+      !course ||
+      !university ||
+      !description
+    ) {
+      return res.status(400).json({
+        error: "Missing required fields",
       });
+    }
 
-      file.on("end", () => {
-        uploadData = {
-          file: Buffer.concat(fileBuffer),
-          filename,
-          mimeType,
-        };
+    // CHECK FILE
+    if (!req.file) {
+      return res.status(400).json({
+        error: "No file uploaded",
       });
+    }
+
+    console.log("FILE RECEIVED:", req.file.originalname);
+
+    // CREATE UNIQUE FILE NAME
+    const fileName = `notes/${uuidv4()}-${req.file.originalname}`;
+
+    // CREATE FILE IN FIREBASE STORAGE
+    const fileUpload = bucket.file(fileName);
+
+    // SAVE FILE
+    await fileUpload.save(req.file.buffer, {
+      metadata: {
+        contentType: req.file.mimetype,
+      },
     });
 
-    busboy.on("finish", async () => {
-      try {
-        if (!uploadData) {
-          return res.status(400).json({
-            error: "No file uploaded",
-          });
-        }
+    console.log("FILE SAVED TO FIREBASE STORAGE");
 
-        const fileName = `notes/${uuidv4()}-${uploadData.filename}`;
-
-        const fileUpload = bucket.file(fileName);
-
-        await fileUpload.save(uploadData.file, {
-          metadata: {
-            contentType: uploadData.mimeType,
-          },
-        });
-
-        const [fileUrl] = await fileUpload.getSignedUrl({
-          action: "read",
-          expires: "03-01-2030",
-        });
-
-        await db.collection("notes").add({
-          userId: fields.userId,
-          email: fields.email,
-          ownerName: fields.ownerName,
-
-          title: fields.title,
-          course: fields.course,
-          university: fields.university,
-          description: fields.description,
-
-          fileUrl,
-          fileName: uploadData.filename,
-
-          createdAt: new Date().toISOString(),
-        });
-
-        return res.json({
-          success: true,
-          fileUrl,
-        });
-
-      } catch (err) {
-        console.log("UPLOAD ERROR:", err.message);
-
-        return res.status(500).json({
-          error: "Upload failed",
-        });
-      }
+    // GENERATE URL
+    const [fileUrl] = await fileUpload.getSignedUrl({
+      action: "read",
+      expires: "03-01-2030",
     });
 
-    req.pipe(busboy);
+    console.log("FILE URL CREATED");
 
-  } catch (error) {
-    console.log("ROUTE ERROR:", error.message);
-
-    return res.status(500).json({
-      error: "Server error",
-    });
-  }
-});
-
-    // VALIDATION (BUSBOY VERSION)
-if (
-  !fields.userId ||
-  !fields.email ||
-  !fields.title ||
-  !fields.course ||
-  !fields.university ||
-  !fields.description
-) {
-  return res.status(400).json({
-    error: "Missing required fields",
-  });
-}
 
     // SAVE TO FIRESTORE
     await db.collection("notes").add({
