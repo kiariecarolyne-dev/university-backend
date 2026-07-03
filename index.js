@@ -118,7 +118,7 @@ app.post("/confirm-payment", async (req, res) => {
 
 
 // ====================================
-// STRIPE CHECKOUT
+// STRIPE CHECKOUT (USD ONLY)
 // ====================================
 app.post("/create-checkout-session", async (req, res) => {
   try {
@@ -129,23 +129,23 @@ app.post("/create-checkout-session", async (req, res) => {
     console.log("PLAN:", plan);
     console.log("CURRENCY:", currency);
 
+    // BLOCK NON-USD PAYMENTS
+    if (currency !== "usd") {
+      return res.status(400).json({
+        error: "Stripe only supports USD payments",
+      });
+    }
+
     let price = 0;
 
-    if (currency === "usd") {
-      if (plan === "2days") price = 50;
-      if (plan === "weekly") price = 150;
-      if (plan === "monthly") price = 500;
-    }
-
-    if (currency === "kes") {
-      if (plan === "2days") price = 5000;
-      if (plan === "weekly") price = 15000;
-      if (plan === "monthly") price = 50000;
-    }
+    // USD PRICES ONLY
+    if (plan === "2days") price = 100;
+    if (plan === "weekly") price = 250;
+    if (plan === "monthly") price = 1000;
 
     if (!price) {
       return res.status(400).json({
-        error: "Invalid plan or currency",
+        error: "Invalid plan",
       });
     }
 
@@ -156,7 +156,7 @@ app.post("/create-checkout-session", async (req, res) => {
       line_items: [
         {
           price_data: {
-            currency: currency,
+            currency: "usd",
             product_data: {
               name: `University Universal ${plan}`,
             },
@@ -176,14 +176,14 @@ app.post("/create-checkout-session", async (req, res) => {
     console.log("STRIPE SESSION CREATED");
     console.log(session.url);
 
-    res.json({
+    return res.json({
       url: session.url,
     });
 
   } catch (error) {
     console.log("STRIPE ERROR:", error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       error: error.message,
     });
   }
@@ -202,13 +202,12 @@ app.get("/success", async (req, res) => {
     console.log("PLAN:", plan);
 
     if (!userId || !plan) {
-      console.log("MISSING DATA");
       return res.status(400).send("Missing userId or plan");
     }
 
     await activatePremium(userId, plan);
 
-    console.log("SUCCESS ROUTE COMPLETE");
+    console.log("PREMIUM ACTIVATED FROM STRIPE");
 
     res.send("Payment successful. Premium activated.");
 
@@ -221,10 +220,11 @@ app.get("/success", async (req, res) => {
 
 
 // ====================================
-// CANCEL
+// STRIPE CANCEL
 // ====================================
 app.get("/cancel", (req, res) => {
-  console.log("PAYMENT CANCELLED");
+  console.log("STRIPE PAYMENT CANCELLED");
+
   res.send("Payment cancelled.");
 });
 
@@ -504,6 +504,71 @@ cron.schedule("0 0 * * *", async () => {
 
   } catch (error) {
     console.log("CRON ERROR:", error.message);
+  }
+});
+
+
+// ====================================
+// UPLOAD NOTES
+// ====================================
+app.post("/upload-note", async (req, res) => {
+  try {
+    const {
+      userId,
+      email,
+      ownerName,
+      title,
+      course,
+      university,
+      description,
+      fileName,
+    } = req.body;
+
+    console.log("UPLOAD NOTE ROUTE HIT");
+    console.log(req.body);
+
+    // VALIDATION
+    if (
+      !userId ||
+      !email ||
+      !title ||
+      !course ||
+      !university ||
+      !description
+    ) {
+      return res.status(400).json({
+        error: "Missing required fields",
+      });
+    }
+
+    // SAVE TO FIRESTORE
+    await db.collection("notes").add({
+      userId,
+      email,
+      ownerName: ownerName || "Unknown Student",
+
+      title,
+      course,
+      university,
+      description,
+
+      fileName: fileName || null,
+
+      createdAt: new Date().toISOString(),
+    });
+
+    console.log("NOTE SAVED SUCCESSFULLY");
+
+    return res.json({
+      success: true,
+    });
+
+  } catch (error) {
+    console.log("UPLOAD NOTE ERROR:", error.message);
+
+    return res.status(500).json({
+      error: "Failed to upload note",
+    });
   }
 });
 
