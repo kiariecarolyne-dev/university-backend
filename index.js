@@ -11,11 +11,12 @@ const cron = require("node-cron");
 
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
-const { getStorage } = require("firebase-admin/storage");
 
 const { v4: uuidv4 } = require("uuid");
 
 const multer = require("multer");
+
+const { createClient } = require("@supabase/supabase-js");
 
 
 // ====================================
@@ -44,7 +45,11 @@ initializeApp({
 });
 
 const db = getFirestore();
-const bucket = getStorage().bucket();
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 
 const app = express();
@@ -570,27 +575,32 @@ console.log("FILE:", req.file?.originalname);
     console.log("FILE RECEIVED:", req.file.originalname);
 
     // CREATE UNIQUE FILE NAME
-    const fileName = `notes/${uuidv4()}-${req.file.originalname}`;
+const fileName = `notes/${uuidv4()}-${req.file.originalname}`;
 
-    // CREATE FILE IN FIREBASE STORAGE
-    const fileUpload = bucket.file(fileName);
+// UPLOAD TO SUPABASE STORAGE
+const { error: uploadError } = await supabase.storage
+  .from("notes")
+  .upload(fileName, req.file.buffer, {
+    contentType: req.file.mimetype,
+    upsert: false,
+  });
 
-    // SAVE FILE
-    await fileUpload.save(req.file.buffer, {
-      metadata: {
-        contentType: req.file.mimetype,
-      },
-    });
+if (uploadError) {
+  throw uploadError;
+}
 
-    console.log("FILE SAVED TO FIREBASE STORAGE");
+console.log("FILE SAVED TO SUPABASE STORAGE");
 
-    // GENERATE URL
-    const [fileUrl] = await fileUpload.getSignedUrl({
-      action: "read",
-      expires: "03-01-2030",
-    });
+// GET PUBLIC URL
+const {
+  data: { publicUrl },
+} = supabase.storage
+  .from("notes")
+  .getPublicUrl(fileName);
 
-    console.log("FILE URL CREATED");
+const fileUrl = publicUrl;
+
+console.log("FILE URL CREATED");
 
 
     // SAVE TO FIRESTORE
