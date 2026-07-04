@@ -618,11 +618,22 @@ console.log("FILE:", req.file?.originalname);
 });
 
   } catch (error) {
-    console.log("UPLOAD NOTE ERROR:", error.message);
+  console.log("====================================");
+  console.log("UPLOAD NOTE ERROR");
+  console.log("MESSAGE:", error.message);
+  console.log("STACK:", error.stack);
+
+  if (error.code) {
+    console.log("CODE:", error.code);
+  }
+
+  if (error.errors) {
+    console.log("ERRORS:", error.errors);
+  }
 
     return res.status(500).json({
-      error: "Failed to upload note",
-    });
+    error: error.message,
+  });
   }
 });
 
