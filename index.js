@@ -575,7 +575,9 @@ console.log("FILE:", req.file?.originalname);
     console.log("FILE RECEIVED:", req.file.originalname);
 
     // CREATE UNIQUE FILE NAME
-const fileName = `${uuidv4()}-${req.file.originalname}`;
+const cleanFileName = decodeURIComponent(req.file.originalname);
+
+const fileName = `${uuidv4()}-${cleanFileName}`;
 
 // UPLOAD TO SUPABASE STORAGE
 const { error: uploadError } = await supabase.storage
