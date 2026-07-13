@@ -545,6 +545,7 @@ console.log("FILE:", req.file?.originalname);
       userId,
       email,
       ownerName,
+      ownerPhoto,
       title,
       course,
       university,
@@ -610,6 +611,7 @@ console.log("FILE URL CREATED");
   userId,
   email,
   ownerName: ownerName || "Unknown Student",
+  ownerPhoto: ownerPhoto || "",
 
   title,
   course,
@@ -648,6 +650,69 @@ console.log("FILE URL CREATED");
   });
   }
 });
+
+
+// ====================================
+// UPLOAD PROFILE PHOTO
+// ====================================
+app.post(
+  "/upload-profile-photo",
+  upload.single("photo"),
+  async (req, res) => {
+    try {
+      console.log("UPLOAD PROFILE PHOTO");
+
+      const { userId } = req.body;
+
+      if (!userId) {
+        return res.status(400).json({
+          error: "Missing userId",
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          error: "No photo uploaded",
+        });
+      }
+
+      const extension =
+        req.file.originalname.split(".").pop();
+
+      const fileName = `${uuidv4()}.${extension}`;
+
+      const { error: uploadError } =
+        await supabase.storage
+          .from("profile-photos")
+          .upload(fileName, req.file.buffer, {
+            contentType: req.file.mimetype,
+            upsert: true,
+          });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage
+        .from("profile-photos")
+        .getPublicUrl(fileName);
+
+      return res.json({
+        success: true,
+        photoUrl: publicUrl,
+      });
+
+    } catch (error) {
+      console.log(error);
+
+      return res.status(500).json({
+        error: error.message,
+      });
+    }
+  }
+);
 
 
 // ====================================
