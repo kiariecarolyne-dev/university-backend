@@ -755,6 +755,14 @@ const signature = req.headers["x-signature"];
 
 const rawBody = req.rawBody;
 
+if (!rawBody) {
+  console.log("Missing raw body");
+
+  return res.status(400).json({
+    error: "Missing raw body",
+  });
+}
+
 const expectedSignature = crypto
   .createHmac("sha256", process.env.LEMON_WEBHOOK_SECRET)
   .update(rawBody)
