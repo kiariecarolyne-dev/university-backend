@@ -2,8 +2,6 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
-const Stripe = require("stripe");
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const axios = require("axios");
 const moment = require("moment");
@@ -142,116 +140,167 @@ app.post("/confirm-payment", async (req, res) => {
 
 
 // ====================================
-// STRIPE CHECKOUT (USD ONLY)
+// FLUTTERWAVE CHECKOUT
 // ====================================
 app.post("/create-checkout-session", async (req, res) => {
   try {
     const { userId, plan, currency } = req.body;
 
-    console.log("CREATE CHECKOUT SESSION");
+    console.log("CREATE FLUTTERWAVE CHECKOUT");
     console.log("USER:", userId);
     console.log("PLAN:", plan);
     console.log("CURRENCY:", currency);
 
-    // BLOCK NON-USD PAYMENTS
-    if (currency !== "usd") {
-      return res.status(400).json({
-        error: "Stripe only supports USD payments",
-      });
-    }
+    let amount = 0;
 
-    let price = 0;
+    // USD prices
+    if (plan === "2days") amount = 1;
+    if (plan === "weekly") amount = 2.5;
+    if (plan === "monthly") amount = 10;
 
-    // USD PRICES ONLY
-    if (plan === "2days") price = 100;
-    if (plan === "weekly") price = 250;
-    if (plan === "monthly") price = 1000;
-
-    if (!price) {
+    if (!amount) {
       return res.status(400).json({
         error: "Invalid plan",
       });
     }
 
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "payment",
+    const tx_ref = `UU-${Date.now()}`;
 
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: `University Universal ${plan}`,
-            },
-            unit_amount: price,
-          },
-          quantity: 1,
-        },
-      ],
-
-      success_url:
-        `${process.env.BASE_URL}/success?userId=${userId}&plan=${plan}`,
-
-      cancel_url:
-        `${process.env.BASE_URL}/cancel`,
+    // Save pending payment
+    await db.collection("flutterwave_pending").doc(tx_ref).set({
+      userId,
+      plan,
+      createdAt: new Date().toISOString(),
     });
 
-    console.log("STRIPE SESSION CREATED");
-    console.log(session.url);
+    const response = await axios.post(
+      "https://api.flutterwave.com/v3/payments",
+      {
+        tx_ref,
+        amount,
+        currency: currency || "USD",
+
+        redirect_url: `${process.env.BASE_URL}/flutterwave-success`,
+
+        customer: {
+          email: "student@universityuniversal.com",
+          name: "University Universal Student",
+        },
+
+        customizations: {
+          title: "University Universal",
+          description: `${plan} Premium Subscription`,
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("FLUTTERWAVE PAYMENT LINK CREATED");
 
     return res.json({
-      url: session.url,
+      url: response.data.data.link,
     });
 
   } catch (error) {
-    console.log("STRIPE ERROR:", error.message);
+
+    console.log("FLUTTERWAVE ERROR");
+
+    if (error.response) {
+      console.log(error.response.data);
+    } else {
+      console.log(error.message);
+    }
 
     return res.status(500).json({
-      error: error.message,
+      error: error.response?.data || error.message,
     });
   }
 });
 
 
 // ====================================
-// STRIPE SUCCESS ROUTE
+// FLUTTERWAVE SUCCESS
 // ====================================
-app.get("/success", async (req, res) => {
+app.get("/flutterwave-success", async (req, res) => {
+
   try {
-    const { userId, plan } = req.query;
 
-    console.log("SUCCESS ROUTE HIT");
-    console.log("USER:", userId);
-    console.log("PLAN:", plan);
+    const { transaction_id } = req.query;
 
-    if (!userId || !plan) {
-      return res.status(400).send("Missing userId or plan");
+    console.log("FLUTTERWAVE SUCCESS");
+
+    if (!transaction_id) {
+      return res.status(400).send("Missing transaction id");
     }
+
+    // Verify payment
+    const verify = await axios.get(
+      `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
+        },
+      }
+    );
+
+    const payment = verify.data.data;
+
+    if (payment.status !== "successful") {
+      return res.send("Payment failed.");
+    }
+
+    const tx_ref = payment.tx_ref;
+
+    const pendingRef = db
+      .collection("flutterwave_pending")
+      .doc(tx_ref);
+
+    const pendingDoc = await pendingRef.get();
+
+    if (!pendingDoc.exists) {
+      return res.send("Payment not found.");
+    }
+
+    const { userId, plan } = pendingDoc.data();
 
     await activatePremium(userId, plan);
 
-    console.log("PREMIUM ACTIVATED FROM STRIPE");
+    await pendingRef.delete();
+
+    console.log("PREMIUM ACTIVATED");
 
     res.send("Payment successful. Premium activated.");
 
   } catch (error) {
-    console.log("SUCCESS ERROR:", error.message);
 
-    res.status(500).send("Something went wrong");
+    console.log("VERIFY ERROR");
+
+    if (error.response) {
+      console.log(error.response.data);
+    } else {
+      console.log(error.message);
+    }
+
+    res.status(500).send("Verification failed.");
   }
 });
 
 
 // ====================================
-// STRIPE CANCEL
+// FLUTTERWAVE CANCEL
 // ====================================
 app.get("/cancel", (req, res) => {
-  console.log("STRIPE PAYMENT CANCELLED");
+
+  console.log("FLUTTERWAVE PAYMENT CANCELLED");
 
   res.send("Payment cancelled.");
-});
 
+});
 
 // ====================================
 // MPESA TOKEN (HARD DEBUG VERSION)
@@ -714,6 +763,21 @@ app.post(
   }
 );
 
+// ====================================
+// PESAPAL IPN
+// ====================================
+app.get("/pesapal-ipn", async (req, res) => {
+
+  console.log("====================================");
+  console.log("PESAPAL IPN RECEIVED");
+
+  console.log(req.query);
+
+  res.json({
+    status: "received",
+  });
+
+});
 
 // ====================================
 // START SERVER
