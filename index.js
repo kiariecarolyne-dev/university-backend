@@ -57,6 +57,38 @@ app.use(express.json());
 
 
 // ====================================
+// TEST PESAPAL TOKEN
+// ====================================
+app.get("/test-pesapal-token", async (req, res) => {
+  try {
+    const response = await axios.post(
+      `${process.env.PESAPAL_BASE_URL}/api/Auth/RequestToken`,
+      {
+        consumer_key: process.env.PESAPAL_CONSUMER_KEY,
+        consumer_secret: process.env.PESAPAL_CONSUMER_SECRET,
+      },
+      {
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    res.json(response.data);
+
+  } catch (error) {
+
+    console.log(error.response?.data || error.message);
+
+    res.status(500).json(
+      error.response?.data || { error: error.message }
+    );
+  }
+});
+
+
+// ====================================
 // ACTIVATE PREMIUM  (FIXED)
 // ====================================
 const activatePremium = async (userId, plan) => {
