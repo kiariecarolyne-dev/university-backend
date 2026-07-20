@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
+const crypto = require("crypto");
 
 const axios = require("axios");
 const moment = require("moment");
@@ -53,7 +54,15 @@ const supabase = createClient(
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      if (req.originalUrl === "/lemon-webhook") {
+        req.rawBody = buf;
+      }
+    },
+  })
+);
 
 
 
@@ -734,7 +743,7 @@ app.post("/create-lemon-checkout", async (req, res) => {
 // LEMON SQUEEZY WEBHOOK
 // ====================================
 
-app.post("/lemon-webhook", async(req,res)=>{
+app.post("/lemon-webhook", async (req, res) => {
 
 try{
 
@@ -742,7 +751,24 @@ try{
 console.log("LEMON WEBHOOK RECEIVED");
 
 
-const event = req.body;
+const signature = req.headers["x-signature"];
+
+const rawBody = req.rawBody;
+
+const expectedSignature = crypto
+  .createHmac("sha256", process.env.LEMON_WEBHOOK_SECRET)
+  .update(rawBody)
+  .digest("hex");
+
+if (signature !== expectedSignature) {
+  console.log("INVALID LEMON SIGNATURE");
+
+  return res.status(401).json({
+    error: "Invalid signature",
+  });
+}
+
+const event = JSON.parse(rawBody.toString());
 
 
 const order = event.data.attributes;
