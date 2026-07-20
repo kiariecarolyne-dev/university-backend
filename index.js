@@ -56,36 +56,7 @@ app.use(cors());
 app.use(express.json());
 
 
-// ====================================
-// TEST PESAPAL TOKEN
-// ====================================
-app.get("/test-pesapal-token", async (req, res) => {
-  try {
-    const response = await axios.post(
-      `${process.env.PESAPAL_BASE_URL}/api/Auth/RequestToken`,
-      {
-        consumer_key: process.env.PESAPAL_CONSUMER_KEY,
-        consumer_secret: process.env.PESAPAL_CONSUMER_SECRET,
-      },
-      {
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      }
-    );
 
-    res.json(response.data);
-
-  } catch (error) {
-
-    console.log(error.response?.data || error.message);
-
-    res.status(500).json(
-      error.response?.data || { error: error.message }
-    );
-  }
-});
 
 
 // ====================================
@@ -171,168 +142,7 @@ app.post("/confirm-payment", async (req, res) => {
 });
 
 
-// ====================================
-// FLUTTERWAVE CHECKOUT
-// ====================================
-app.post("/create-checkout-session", async (req, res) => {
-  try {
-    const { userId, plan, currency } = req.body;
 
-    console.log("CREATE FLUTTERWAVE CHECKOUT");
-    console.log("USER:", userId);
-    console.log("PLAN:", plan);
-    console.log("CURRENCY:", currency);
-
-    let amount = 0;
-
-    // USD prices
-    if (plan === "2days") amount = 1;
-    if (plan === "weekly") amount = 2.5;
-    if (plan === "monthly") amount = 10;
-
-    if (!amount) {
-      return res.status(400).json({
-        error: "Invalid plan",
-      });
-    }
-
-    const tx_ref = `UU-${Date.now()}`;
-
-    // Save pending payment
-    await db.collection("flutterwave_pending").doc(tx_ref).set({
-      userId,
-      plan,
-      createdAt: new Date().toISOString(),
-    });
-
-    const response = await axios.post(
-      "https://api.flutterwave.com/v3/payments",
-      {
-        tx_ref,
-        amount,
-        currency: currency || "USD",
-
-        redirect_url: `${process.env.BASE_URL}/flutterwave-success`,
-
-        customer: {
-          email: "student@universityuniversal.com",
-          name: "University Universal Student",
-        },
-
-        customizations: {
-          title: "University Universal",
-          description: `${plan} Premium Subscription`,
-        },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    console.log("FLUTTERWAVE PAYMENT LINK CREATED");
-
-    return res.json({
-      url: response.data.data.link,
-    });
-
-  } catch (error) {
-
-    console.log("FLUTTERWAVE ERROR");
-
-    if (error.response) {
-      console.log(error.response.data);
-    } else {
-      console.log(error.message);
-    }
-
-    return res.status(500).json({
-      error: error.response?.data || error.message,
-    });
-  }
-});
-
-
-// ====================================
-// FLUTTERWAVE SUCCESS
-// ====================================
-app.get("/flutterwave-success", async (req, res) => {
-
-  try {
-
-    const { transaction_id } = req.query;
-
-    console.log("FLUTTERWAVE SUCCESS");
-
-    if (!transaction_id) {
-      return res.status(400).send("Missing transaction id");
-    }
-
-    // Verify payment
-    const verify = await axios.get(
-      `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
-        },
-      }
-    );
-
-    const payment = verify.data.data;
-
-    if (payment.status !== "successful") {
-      return res.send("Payment failed.");
-    }
-
-    const tx_ref = payment.tx_ref;
-
-    const pendingRef = db
-      .collection("flutterwave_pending")
-      .doc(tx_ref);
-
-    const pendingDoc = await pendingRef.get();
-
-    if (!pendingDoc.exists) {
-      return res.send("Payment not found.");
-    }
-
-    const { userId, plan } = pendingDoc.data();
-
-    await activatePremium(userId, plan);
-
-    await pendingRef.delete();
-
-    console.log("PREMIUM ACTIVATED");
-
-    res.send("Payment successful. Premium activated.");
-
-  } catch (error) {
-
-    console.log("VERIFY ERROR");
-
-    if (error.response) {
-      console.log(error.response.data);
-    } else {
-      console.log(error.message);
-    }
-
-    res.status(500).send("Verification failed.");
-  }
-});
-
-
-// ====================================
-// FLUTTERWAVE CANCEL
-// ====================================
-app.get("/cancel", (req, res) => {
-
-  console.log("FLUTTERWAVE PAYMENT CANCELLED");
-
-  res.send("Payment cancelled.");
-
-});
 
 // ====================================
 // MPESA TOKEN (HARD DEBUG VERSION)
@@ -795,21 +605,204 @@ app.post(
   }
 );
 
+
 // ====================================
-// PESAPAL IPN
+// LEMON SQUEEZY CREATE CHECKOUT
 // ====================================
-app.get("/pesapal-ipn", async (req, res) => {
 
-  console.log("====================================");
-  console.log("PESAPAL IPN RECEIVED");
+app.post("/create-lemon-checkout", async (req, res) => {
 
-  console.log(req.query);
+  try {
 
-  res.json({
-    status: "received",
-  });
+    const { userId, plan } = req.body;
+
+    console.log("LEMON CHECKOUT REQUEST");
+    console.log(userId, plan);
+
+
+    let variantId;
+
+
+    if (plan === "2days") {
+      variantId = process.env.LEMON_2DAY_VARIANT_ID;
+    }
+
+
+    if (plan === "weekly") {
+      variantId = process.env.LEMON_WEEK_VARIANT_ID;
+    }
+
+
+    if (plan === "monthly") {
+      variantId = process.env.LEMON_MONTH_VARIANT_ID;
+    }
+
+
+    if (!variantId) {
+      return res.status(400).json({
+        error:"Invalid plan"
+      });
+    }
+
+
+
+    const response = await axios.post(
+
+      "https://api.lemonsqueezy.com/v1/checkouts",
+
+      {
+        data:{
+          type:"checkouts",
+
+          attributes:{
+
+            checkout_data:{
+              custom:{
+                user_id:userId,
+                plan:plan
+              }
+            }
+
+          },
+
+          relationships:{
+            store:{
+              data:{
+                type:"stores",
+                id:process.env.LEMON_SQUEEZY_STORE_ID
+              }
+            },
+
+            variant:{
+              data:{
+                type:"variants",
+                id:variantId
+              }
+            }
+          }
+        }
+
+      },
+
+
+      {
+
+        headers:{
+
+          Authorization:
+          `Bearer ${process.env.LEMON_SQUEEZY_API_KEY}`,
+
+          "Content-Type":"application/vnd.api+json",
+
+          Accept:
+          "application/vnd.api+json"
+
+        }
+
+      }
+
+    );
+
+
+    res.json({
+
+      url:
+      response.data.data.attributes.url
+
+    });
+
+
+
+  } catch(error){
+
+    console.log(
+      "LEMON CHECKOUT ERROR",
+      error.response?.data || error.message
+    );
+
+
+    res.status(500).json({
+      error:"Checkout creation failed"
+    });
+
+  }
 
 });
+
+
+// ====================================
+// LEMON SQUEEZY WEBHOOK
+// ====================================
+
+app.post("/lemon-webhook", async(req,res)=>{
+
+try{
+
+
+console.log("LEMON WEBHOOK RECEIVED");
+
+
+const event = req.body;
+
+
+const order = event.data.attributes;
+
+
+if(
+event.meta.event_name === "order_created"
+){
+
+
+const userId =
+event.meta.custom_data?.user_id;
+
+const plan =
+event.meta.custom_data?.plan;
+
+
+
+console.log(
+"ACTIVATING:",
+userId,
+plan
+);
+
+
+
+await activatePremium(
+userId,
+plan
+);
+
+
+}
+
+
+
+res.json({
+received:true
+});
+
+
+}catch(error){
+
+
+console.log(
+"LEMON WEBHOOK ERROR",
+error.message
+);
+
+
+res.status(500).json({
+error:error.message
+});
+
+
+}
+
+
+});
+
 
 // ====================================
 // START SERVER
