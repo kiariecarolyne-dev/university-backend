@@ -553,6 +553,70 @@ console.log("FILE URL CREATED");
 
 
 // ====================================
+// UPLOAD PAST PAPER
+// ====================================
+app.post("/upload-pastpaper", upload.single("file"), async (req, res) => {
+  try {
+    console.log("UPLOAD PAST PAPER");
+
+    const { name } = req.body;
+
+    if (!name) {
+      return res.status(400).json({
+        error: "Paper name is required",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: "No PDF uploaded",
+      });
+    }
+
+    const cleanFileName = decodeURIComponent(req.file.originalname);
+
+    const fileName = `${uuidv4()}-${cleanFileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("pastpapers")
+      .upload(fileName, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage
+      .from("pastpapers")
+      .getPublicUrl(fileName);
+
+    await db.collection("pastPapers").add({
+      name,
+      fileName: req.file.originalname,
+      fileUrl: publicUrl,
+      downloads: 0,
+      createdAt: new Date().toISOString(),
+    });
+
+    res.json({
+      success: true,
+    });
+
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+});
+
+
+// ====================================
 // UPLOAD PROFILE PHOTO
 // ====================================
 app.post(
