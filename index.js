@@ -553,67 +553,107 @@ console.log("FILE URL CREATED");
 
 
 // ====================================
-// UPLOAD PAST PAPER
+// UPLOAD MULTIPLE PAST PAPERS
 // ====================================
-app.post("/upload-pastpaper", upload.single("file"), async (req, res) => {
-  try {
-    console.log("UPLOAD PAST PAPER");
+app.post(
+  "/upload-pastpapers",
+  upload.array("files", 100),
+  async (req, res) => {
+    try {
+      console.log("UPLOAD MULTIPLE PAST PAPERS");
 
-    const { name } = req.body;
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({
+          error: "No PDF files uploaded",
+        });
+      }
 
-    if (!name) {
-      return res.status(400).json({
-        error: "Paper name is required",
+      const uploaded = [];
+      const failed = [];
+
+      for (const file of req.files) {
+        try {
+          // Remove .pdf from filename to create paper name
+          const cleanOriginalName =
+            decodeURIComponent(file.originalname);
+
+          const paperName = cleanOriginalName.replace(
+            /\.pdf$/i,
+            ""
+          );
+
+          const fileName =
+            `${uuidv4()}-${cleanOriginalName}`;
+
+          // Upload PDF to Supabase
+          const { error: uploadError } =
+            await supabase.storage
+              .from("pastpapers")
+              .upload(
+                fileName,
+                file.buffer,
+                {
+                  contentType: file.mimetype,
+                  upsert: false,
+                }
+              );
+
+          if (uploadError) {
+            throw uploadError;
+          }
+
+          // Get public URL
+          const {
+            data: { publicUrl },
+          } = supabase.storage
+            .from("pastpapers")
+            .getPublicUrl(fileName);
+
+          // Save to Firestore
+          await db.collection("pastPapers").add({
+            name: paperName,
+            fileName: cleanOriginalName,
+            fileUrl: publicUrl,
+            downloads: 0,
+            createdAt: new Date().toISOString(),
+          });
+
+          uploaded.push({
+            name: paperName,
+            fileName: cleanOriginalName,
+          });
+
+        } catch (error) {
+          console.log(
+            `Failed to upload ${file.originalname}:`,
+            error
+          );
+
+          failed.push({
+            name: file.originalname,
+            error: error.message,
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        total: req.files.length,
+        uploaded: uploaded.length,
+        failed: failed.length,
+        uploadedFiles: uploaded,
+        failedFiles: failed,
+      });
+
+    } catch (error) {
+      console.log(error);
+
+      return res.status(500).json({
+        error: error.message,
       });
     }
-
-    if (!req.file) {
-      return res.status(400).json({
-        error: "No PDF uploaded",
-      });
-    }
-
-    const cleanFileName = decodeURIComponent(req.file.originalname);
-
-    const fileName = `${uuidv4()}-${cleanFileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("pastpapers")
-      .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype,
-        upsert: false,
-      });
-
-    if (uploadError) {
-      throw uploadError;
-    }
-
-    const {
-      data: { publicUrl },
-    } = supabase.storage
-      .from("pastpapers")
-      .getPublicUrl(fileName);
-
-    await db.collection("pastPapers").add({
-      name,
-      fileName: req.file.originalname,
-      fileUrl: publicUrl,
-      downloads: 0,
-      createdAt: new Date().toISOString(),
-    });
-
-    res.json({
-      success: true,
-    });
-
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({
-      error: error.message,
-    });
   }
-});
+);
 
 
 // ====================================
