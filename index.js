@@ -24,7 +24,7 @@ const { createClient } = require("@supabase/supabase-js");
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 50 * 1024 * 1024,
+    fileSize: 100 * 1024 * 1024,
   },
 });
 
@@ -598,6 +598,132 @@ app.post(
   }
 );
 
+// ====================================
+// UPLOAD SOCIAL MEDIA
+// PHOTOS + VIDEOS
+// ====================================
+
+app.post(
+  "/upload-social-media",
+  upload.single("media"),
+  async (req, res) => {
+    try {
+      console.log("====================================");
+      console.log("UPLOAD SOCIAL MEDIA");
+
+      const { userId, mediaType } = req.body;
+
+      console.log("USER ID:", userId);
+      console.log("MEDIA TYPE:", mediaType);
+
+      if (!userId) {
+        return res.status(400).json({
+          error: "Missing userId",
+        });
+      }
+
+      if (!mediaType) {
+        return res.status(400).json({
+          error: "Missing mediaType",
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          error: "No media uploaded",
+        });
+      }
+
+      // Only allow photos and videos
+      if (
+        mediaType !== "image" &&
+        mediaType !== "video"
+      ) {
+        return res.status(400).json({
+          error: "Invalid media type",
+        });
+      }
+
+      // Get original extension
+      const originalName =
+        req.file.originalname || "media";
+
+      const extension =
+        originalName.includes(".")
+          ? originalName.split(".").pop()
+          : mediaType === "image"
+          ? "jpg"
+          : "mp4";
+
+      // Put media into photos/ or videos/
+      const folder =
+        mediaType === "image"
+          ? "photos"
+          : "videos";
+
+      const fileName =
+        `${folder}/${uuidv4()}.${extension}`;
+
+      console.log("UPLOADING:", fileName);
+
+      const { error: uploadError } =
+        await supabase.storage
+          .from("social-media")
+          .upload(
+            fileName,
+            req.file.buffer,
+            {
+              contentType:
+                req.file.mimetype,
+              upsert: false,
+            }
+          );
+
+      if (uploadError) {
+        console.log(
+          "SUPABASE UPLOAD ERROR:",
+          uploadError
+        );
+
+        throw uploadError;
+      }
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage
+        .from("social-media")
+        .getPublicUrl(fileName);
+
+      console.log(
+        "SOCIAL MEDIA UPLOAD SUCCESSFUL"
+      );
+
+      console.log(
+        "PUBLIC URL:",
+        publicUrl
+      );
+
+      return res.json({
+        success: true,
+        mediaUrl: publicUrl,
+        mediaType,
+        fileName,
+      });
+
+    } catch (error) {
+      console.log(
+        "SOCIAL MEDIA UPLOAD ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Social media upload failed",
+      });
+    }
+  }
+);
 
 // ====================================
 // LEMON SQUEEZY CREATE CHECKOUT
