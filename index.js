@@ -182,16 +182,30 @@ const getMpesaAccessToken = async () => {
       `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
     ).toString("base64");
 
+    console.log("MPESA CREDENTIALS FOUND");
+    console.log("CONTACTING SAFARICOM OAUTH...");
+
     const response = await axios.get(
       "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
       {
         headers: {
           Authorization: `Basic ${auth}`,
         },
+        timeout: 15000,
       }
     );
 
     console.log("MPESA ACCESS TOKEN RECEIVED");
+    console.log(
+      "TOKEN RESPONSE CODE:",
+      response.status
+    );
+
+    if (!response.data?.access_token) {
+      throw new Error(
+        "Safaricom did not return an access token"
+      );
+    }
 
     return response.data.access_token;
 
@@ -199,14 +213,31 @@ const getMpesaAccessToken = async () => {
     console.log("====================================");
     console.log("MPESA TOKEN ERROR");
 
+    if (error.code === "ECONNABORTED") {
+      console.log(
+        "ERROR: Safaricom OAuth request timed out"
+      );
+    }
+
     if (error.response) {
-      console.log("STATUS:", error.response.status);
+      console.log(
+        "STATUS:",
+        error.response.status
+      );
+
       console.log(
         "DATA:",
-        JSON.stringify(error.response.data, null, 2)
+        JSON.stringify(
+          error.response.data,
+          null,
+          2
+        )
       );
     } else {
-      console.log("MESSAGE:", error.message);
+      console.log(
+        "MESSAGE:",
+        error.message
+      );
     }
 
     throw error;
