@@ -439,6 +439,11 @@ app.post("/mpesa-callback", async (req, res) => {
     const callback =
       req.body?.Body?.stkCallback;
 
+      console.log(
+  "FULL STK CALLBACK:",
+  JSON.stringify(callback, null, 2)
+);
+
     if (!callback) {
       console.log("INVALID CALLBACK BODY");
 
@@ -463,6 +468,11 @@ app.post("/mpesa-callback", async (req, res) => {
       "RESULT CODE:",
       resultCode
     );
+
+    console.log(
+  "RESULT DESCRIPTION:",
+  callback.ResultDesc
+);
 
     // ====================================
     // PAYMENT FAILED / CANCELLED
