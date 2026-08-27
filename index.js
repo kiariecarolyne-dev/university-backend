@@ -69,19 +69,25 @@ app.use(
 
 
 // ====================================
-// ACTIVATE PREMIUM  (FIXED)
+// ACTIVATE PREMIUM
 // ====================================
+
 const activatePremium = async (userId, plan) => {
   try {
-    console.log("ACTIVATING PREMIUM...");
+    console.log("====================================");
+    console.log("ACTIVATING PREMIUM");
     console.log("USER ID:", userId);
     console.log("PLAN:", plan);
 
-    let premiumUntil = new Date();
-
-    if (plan === "2days") {
-      premiumUntil.setDate(premiumUntil.getDate() + 2);
+    if (!userId) {
+      throw new Error("Missing userId");
     }
+
+    if (!["weekly", "monthly"].includes(plan)) {
+      throw new Error("Invalid Premium plan");
+    }
+
+    const premiumUntil = new Date();
 
     if (plan === "weekly") {
       premiumUntil.setDate(premiumUntil.getDate() + 7);
@@ -91,7 +97,7 @@ const activatePremium = async (userId, plan) => {
       premiumUntil.setMonth(premiumUntil.getMonth() + 1);
     }
 
-    console.log("WRITING TO FIRESTORE...");
+    console.log("PREMIUM UNTIL:", premiumUntil.toISOString());
 
     await db.collection("users").doc(userId).set(
       {
@@ -104,6 +110,7 @@ const activatePremium = async (userId, plan) => {
 
     console.log("FIRESTORE UPDATED SUCCESSFULLY");
     console.log("PREMIUM ACTIVATED SUCCESSFULLY");
+    console.log("====================================");
 
   } catch (error) {
     console.log("ACTIVATE PREMIUM ERROR:", error.message);
@@ -154,42 +161,26 @@ app.post("/confirm-payment", async (req, res) => {
 
 
 // ====================================
-// MPESA TOKEN (HARD DEBUG VERSION)
+// MPESA ACCESS TOKEN
+// LIVE
 // ====================================
+
 const getMpesaAccessToken = async () => {
   try {
     console.log("====================================");
-    console.log("===== MPESA ENV DEBUG =====");
+    console.log("GETTING LIVE MPESA ACCESS TOKEN");
 
-    // CHECK IF ENV VARIABLES EXIST
-    console.log(
-      "MPESA_CONSUMER_KEY EXISTS:",
-      !!process.env.MPESA_CONSUMER_KEY
-    );
+    if (!process.env.MPESA_CONSUMER_KEY) {
+      throw new Error("MPESA_CONSUMER_KEY is missing");
+    }
 
-    console.log(
-      "MPESA_CONSUMER_SECRET EXISTS:",
-      !!process.env.MPESA_CONSUMER_SECRET
-    );
-
-    // CHECK LENGTHS (helps detect broken .env)
-    console.log(
-      "MPESA_CONSUMER_KEY LENGTH:",
-      process.env.MPESA_CONSUMER_KEY?.length
-    );
-
-    console.log(
-      "MPESA_CONSUMER_SECRET LENGTH:",
-      process.env.MPESA_CONSUMER_SECRET?.length
-    );
-
-    console.log("REQUESTING MPESA ACCESS TOKEN...");
+    if (!process.env.MPESA_CONSUMER_SECRET) {
+      throw new Error("MPESA_CONSUMER_SECRET is missing");
+    }
 
     const auth = Buffer.from(
       `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
     ).toString("base64");
-
-    console.log("AUTH GENERATED SUCCESSFULLY");
 
     const response = await axios.get(
       "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
@@ -200,21 +191,22 @@ const getMpesaAccessToken = async () => {
       }
     );
 
-    console.log("TOKEN RECEIVED SUCCESSFULLY");
-    console.log("ACCESS TOKEN:", response.data.access_token);
+    console.log("MPESA ACCESS TOKEN RECEIVED");
 
     return response.data.access_token;
 
   } catch (error) {
     console.log("====================================");
-    console.log("TOKEN ERROR OCCURRED");
+    console.log("MPESA TOKEN ERROR");
 
     if (error.response) {
-      console.log("SAFARICOM TOKEN ERROR RESPONSE:");
-      console.log(error.response.data);
+      console.log("STATUS:", error.response.status);
+      console.log(
+        "DATA:",
+        JSON.stringify(error.response.data, null, 2)
+      );
     } else {
-      console.log("ERROR MESSAGE:");
-      console.log(error.message);
+      console.log("MESSAGE:", error.message);
     }
 
     throw error;
@@ -225,6 +217,7 @@ const getMpesaAccessToken = async () => {
 // ====================================
 // MPESA PASSWORD
 // ====================================
+
 const generateMpesaPassword = () => {
   const timestamp = moment().format("YYYYMMDDHHmmss");
 
@@ -232,90 +225,144 @@ const generateMpesaPassword = () => {
     `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
   ).toString("base64");
 
-  return { password, timestamp };
+  return {
+    password,
+    timestamp,
+  };
 };
 
 
 // ====================================
-// MPESA PAYMENT (DEBUG VERSION)
+// MPESA PAYMENT
+// LIVE
 // ====================================
+
 app.post("/mpesa-payment", async (req, res) => {
   console.log("====================================");
-  console.log("MPESA ROUTE HIT");
+  console.log("MPESA PAYMENT ROUTE HIT");
 
   try {
     const { phone, userId, plan } = req.body;
 
-    // =========================
-// SECURE PREMIUM PRICING
-// =========================
-let amount;
-
-if (plan === "weekly") {
-  amount = 50;
-} else if (plan === "monthly") {
-  amount = 150;
-} else {
-  return res.status(400).json({
-    error: "Invalid Premium plan",
-  });
-}
-
-    // LOG EVERYTHING COMING FROM APP
-    console.log("BODY:", req.body);
-    console.log("PHONE:", phone);
-    console.log("AMOUNT:", amount);
     console.log("USER ID:", userId);
     console.log("PLAN:", plan);
+    console.log("PHONE:", phone);
 
-    // VALIDATION
-    if (!phone || !amount || !userId || !plan) {
-      console.log("MISSING REQUIRED FIELDS");
+    // ====================================
+    // VALIDATE PLAN
+    // ====================================
 
+    let amount;
+
+    if (plan === "weekly") {
+      amount = 50;
+    } else if (plan === "monthly") {
+      amount = 150;
+    } else {
       return res.status(400).json({
-        error: "Missing phone, amount, userId or plan",
+        error: "Invalid Premium plan",
       });
     }
+
+    // ====================================
+    // VALIDATE REQUEST
+    // ====================================
+
+    if (!phone || !userId || !plan) {
+      return res.status(400).json({
+        error: "Missing phone, userId or plan",
+      });
+    }
+
+    console.log("SECURE AMOUNT:", amount);
+
+    // ====================================
+    // GET MPESA TOKEN
+    // ====================================
 
     console.log("GETTING MPESA ACCESS TOKEN...");
 
     const accessToken = await getMpesaAccessToken();
 
-    console.log("ACCESS TOKEN SUCCESS");
+    console.log("MPESA TOKEN RECEIVED");
 
-    const { password, timestamp } = generateMpesaPassword();
+    // ====================================
+    // GENERATE PASSWORD
+    // ====================================
 
-    console.log("PASSWORD GENERATED");
+    const { password, timestamp } =
+      generateMpesaPassword();
+
     console.log("TIMESTAMP:", timestamp);
 
-    console.log("SENDING STK PUSH TO SAFARICOM...");
+    // ====================================
+    // SEND STK PUSH
+    // ====================================
+
+    console.log("SENDING LIVE MPESA STK PUSH");
 
     const response = await axios.post(
       "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
       {
-        BusinessShortCode: process.env.MPESA_SHORTCODE,
+        BusinessShortCode:
+          process.env.MPESA_SHORTCODE,
+
         Password: password,
+
         Timestamp: timestamp,
-        TransactionType: "CustomerPayBillOnline",
+
+        TransactionType:
+          "CustomerBuyGoodsOnline",
+
         Amount: amount,
+
         PartyA: phone,
-        PartyB: process.env.MPESA_SHORTCODE,
+
+        PartyB:
+          process.env.MPESA_SHORTCODE,
+
         PhoneNumber: phone,
-        CallBackURL: process.env.MPESA_CALLBACK_URL,
-        AccountReference: "UniversityUniversal",
-        TransactionDesc: "Premium Subscription",
+
+        CallBackURL:
+          process.env.MPESA_CALLBACK_URL,
+
+        AccountReference:
+          "UniversityUniversal",
+
+        TransactionDesc:
+          `Premium ${plan}`,
       },
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization:
+            `Bearer ${accessToken}`,
+
+          "Content-Type":
+            "application/json",
         },
       }
     );
 
-    console.log("STK PUSH RESPONSE:");
+    console.log("====================================");
+    console.log("MPESA STK RESPONSE");
     console.log(response.data);
+    console.log("====================================");
 
-    console.log("SAVING PENDING PAYMENT...");
+    // ====================================
+    // CHECK SAFARICOM RESPONSE
+    // ====================================
+
+    if (!response.data?.CheckoutRequestID) {
+      return res.status(500).json({
+        error:
+          "M-Pesa did not return a CheckoutRequestID",
+        details: response.data,
+      });
+    }
+
+    // ====================================
+    // SAVE PENDING PAYMENT
+    // ====================================
 
     await db
       .collection("mpesa_pending")
@@ -325,124 +372,260 @@ if (plan === "weekly") {
         plan,
         phone,
         amount,
-        createdAt: new Date().toISOString(),
+        checkoutRequestId:
+          response.data.CheckoutRequestID,
+        merchantRequestId:
+          response.data.MerchantRequestID || null,
+        createdAt:
+          new Date().toISOString(),
+        status: "pending",
       });
 
-    console.log("PENDING PAYMENT SAVED SUCCESSFULLY");
+    console.log(
+      "PENDING MPESA PAYMENT SAVED"
+    );
 
     return res.json({
       success: true,
+      message:
+        "M-Pesa payment request sent",
       data: response.data,
     });
 
   } catch (error) {
-  console.log("====================================");
-  console.log("MPESA ERROR OCCURRED");
-  console.log("FULL ERROR OBJECT:");
+    console.log("====================================");
+    console.log("MPESA PAYMENT ERROR");
 
-  if (error.response) {
-    console.log("STATUS:", error.response.status);
+    if (error.response) {
+      console.log(
+        "STATUS:",
+        error.response.status
+      );
 
-    console.log(
-      "DATA:",
-      JSON.stringify(error.response.data, null, 2)
-    );
+      console.log(
+        "DATA:",
+        JSON.stringify(
+          error.response.data,
+          null,
+          2
+        )
+      );
+    } else {
+      console.log(
+        "MESSAGE:",
+        error.message
+      );
+    }
 
-    console.log(
-      "HEADERS:",
-      JSON.stringify(error.response.headers, null, 2)
-    );
-  } else {
-    console.log("MESSAGE:", error.message);
+    return res.status(500).json({
+      error:
+        "M-Pesa payment failed",
+      details:
+        error.response?.data ||
+        error.message,
+    });
   }
-
-  return res.status(500).json({
-    error: "M-Pesa payment failed",
-    status: error.response?.status,
-    details: error.response?.data || error.message,
-  });
-}
 });
 
 // ====================================
 // MPESA CALLBACK
 // ====================================
-app.post("/mpesa-callback", async (req, res) => {
-  try {
-    const callback = req.body.Body.stkCallback;
-    const checkoutId = callback.CheckoutRequestID;
-    const resultCode = callback.ResultCode;
 
-    console.log("MPESA CALLBACK HIT");
+app.post("/mpesa-callback", async (req, res) => {
+  console.log("====================================");
+  console.log("MPESA CALLBACK RECEIVED");
+
+  try {
+    const callback =
+      req.body?.Body?.stkCallback;
+
+    if (!callback) {
+      console.log("INVALID CALLBACK BODY");
+
+      return res.json({
+        ResultCode: 0,
+        ResultDesc: "Received",
+      });
+    }
+
+    const checkoutId =
+      callback.CheckoutRequestID;
+
+    const resultCode =
+      callback.ResultCode;
+
+    console.log(
+      "CHECKOUT REQUEST ID:",
+      checkoutId
+    );
+
+    console.log(
+      "RESULT CODE:",
+      resultCode
+    );
+
+    // ====================================
+    // PAYMENT FAILED / CANCELLED
+    // ====================================
 
     if (resultCode !== 0) {
+      console.log(
+        "MPESA PAYMENT NOT SUCCESSFUL"
+      );
+
+      const pendingRef =
+        db.collection("mpesa_pending")
+          .doc(checkoutId);
+
+      await pendingRef.set(
+        {
+          status: "failed",
+          resultCode,
+          resultDescription:
+            callback.ResultDesc ||
+            "Payment failed",
+          updatedAt:
+            new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
       return res.json({
         ResultCode: 0,
         ResultDesc: "Received",
       });
     }
 
-    const pendingRef = db.collection("mpesa_pending").doc(checkoutId);
-    const pendingDoc = await pendingRef.get();
+    // ====================================
+    // FIND PENDING PAYMENT
+    // ====================================
+
+    const pendingRef =
+      db.collection("mpesa_pending")
+        .doc(checkoutId);
+
+    const pendingDoc =
+      await pendingRef.get();
 
     if (!pendingDoc.exists) {
+      console.log(
+        "PENDING PAYMENT NOT FOUND"
+      );
+
       return res.json({
         ResultCode: 0,
         ResultDesc: "Received",
       });
     }
 
-    const { userId, plan } = pendingDoc.data();
+    const {
+      userId,
+      plan,
+    } = pendingDoc.data();
 
-    await activatePremium(userId, plan);
+    console.log(
+      "ACTIVATING PREMIUM:",
+      userId,
+      plan
+    );
+
+    // ====================================
+    // ACTIVATE PREMIUM
+    // ====================================
+
+    await activatePremium(
+      userId,
+      plan
+    );
+
+    // ====================================
+    // DELETE PENDING PAYMENT
+    // ====================================
+
     await pendingRef.delete();
 
-    res.json({
+    console.log(
+      "MPESA PAYMENT COMPLETED"
+    );
+
+    console.log(
+      "PREMIUM ACTIVATED"
+    );
+
+    return res.json({
       ResultCode: 0,
       ResultDesc: "Success",
     });
 
   } catch (error) {
-    console.log("CALLBACK ERROR:", error.message);
+    console.log(
+      "MPESA CALLBACK ERROR:",
+      error.message
+    );
 
-    res.json({
+    // Always acknowledge callback
+    return res.json({
       ResultCode: 0,
-      ResultDesc: "Error handled",
+      ResultDesc: "Received",
     });
   }
 });
 
+// ====================================
+// EXPIRE PREMIUM DAILY
+// ====================================
 
-// ====================================
-// EXPIRE PREMIUM DAILY (FIXED)
-// ====================================
 cron.schedule("0 0 * * *", async () => {
   try {
-    const users = await db.collection("users").get();
+    console.log(
+      "CHECKING EXPIRED PREMIUM ACCOUNTS"
+    );
+
+    const users =
+      await db.collection("users").get();
+
     const now = new Date();
 
     for (const doc of users.docs) {
       const user = doc.data();
 
-      if (user.isPremium && user.premiumUntil) {
-        const expiry = new Date(user.premiumUntil);
+      if (
+        user.isPremium &&
+        user.premiumUntil
+      ) {
+        const expiry =
+          new Date(user.premiumUntil);
 
-        if (now > expiry) {
-          await db.collection("users").doc(doc.id).set(
-            {
-              isPremium: false,
-              premiumUntil: null,
-            },
-            { merge: true }
+        if (now >= expiry) {
+          console.log(
+            "EXPIRING PREMIUM:",
+            doc.id
           );
+
+          await db
+            .collection("users")
+            .doc(doc.id)
+            .set(
+              {
+                isPremium: false,
+                premiumUntil: null,
+                premiumPlan: null,
+              },
+              { merge: true }
+            );
         }
       }
     }
 
-    console.log("PREMIUM CLEANUP DONE");
+    console.log(
+      "PREMIUM CLEANUP DONE"
+    );
 
   } catch (error) {
-    console.log("CRON ERROR:", error.message);
+    console.log(
+      "CRON ERROR:",
+      error.message
+    );
   }
 });
 
@@ -746,223 +929,336 @@ app.post(
 // LEMON SQUEEZY CREATE CHECKOUT
 // ====================================
 
-app.post("/create-lemon-checkout", async (req, res) => {
+app.post(
+  "/create-lemon-checkout",
+  async (req, res) => {
+    try {
+      const { userId, plan } = req.body;
 
-  try {
+      console.log(
+        "===================================="
+      );
+      console.log(
+        "LEMON SQUEEZY CHECKOUT REQUEST"
+      );
+      console.log("USER ID:", userId);
+      console.log("PLAN:", plan);
 
-    const { userId, plan } = req.body;
-
-    console.log("LEMON CHECKOUT REQUEST");
-    console.log(userId, plan);
-
-
-    let variantId;
-
-
-    if (plan === "2days") {
-      variantId = process.env.LEMON_2DAY_VARIANT_ID;
-    }
-
-
-    if (plan === "weekly") {
-      variantId = process.env.LEMON_WEEK_VARIANT_ID;
-    }
-
-
-    if (plan === "monthly") {
-      variantId = process.env.LEMON_MONTH_VARIANT_ID;
-    }
-
-
-    if (!variantId) {
-      return res.status(400).json({
-        error:"Invalid plan"
-      });
-    }
-
-
-
-    const response = await axios.post(
-
-      "https://api.lemonsqueezy.com/v1/checkouts",
-
-      {
-        data:{
-          type:"checkouts",
-
-          attributes:{
-
-            checkout_data:{
-              custom:{
-                user_id:userId,
-                plan:plan
-              }
-            }
-
-          },
-
-          relationships:{
-            store:{
-              data:{
-                type:"stores",
-                id:process.env.LEMON_SQUEEZY_STORE_ID
-              }
-            },
-
-            variant:{
-              data:{
-                type:"variants",
-                id:variantId
-              }
-            }
-          }
-        }
-
-      },
-
-
-      {
-
-        headers:{
-
-          Authorization:
-          `Bearer ${process.env.LEMON_SQUEEZY_API_KEY}`,
-
-          "Content-Type":"application/vnd.api+json",
-
-          Accept:
-          "application/vnd.api+json"
-
-        }
-
+      if (!userId) {
+        return res.status(400).json({
+          error: "Missing userId",
+        });
       }
 
-    );
+      // ====================================
+      // SELECT VARIANT
+      // ====================================
 
+      let variantId;
 
-    res.json({
+      if (plan === "weekly") {
+        variantId =
+          process.env.LEMON_WEEK_VARIANT_ID;
+      } else if (plan === "monthly") {
+        variantId =
+          process.env.LEMON_MONTH_VARIANT_ID;
+      } else {
+        return res.status(400).json({
+          error: "Invalid Premium plan",
+        });
+      }
 
-      url:
-      response.data.data.attributes.url
+      if (!variantId) {
+        return res.status(500).json({
+          error:
+            "Lemon Squeezy variant ID is missing",
+        });
+      }
 
-    });
+      // ====================================
+      // CREATE CHECKOUT
+      // ====================================
 
+      const response = await axios.post(
+        "https://api.lemonsqueezy.com/v1/checkouts",
+        {
+          data: {
+            type: "checkouts",
 
+            attributes: {
+              checkout_data: {
+                custom: {
+                  user_id: userId,
+                  plan: plan,
+                },
+              },
+            },
 
-  } catch(error){
+            relationships: {
+              store: {
+                data: {
+                  type: "stores",
+                  id:
+                    process.env
+                      .LEMON_SQUEEZY_STORE_ID,
+                },
+              },
 
-    console.log(
-      "LEMON CHECKOUT ERROR",
-      error.response?.data || error.message
-    );
+              variant: {
+                data: {
+                  type: "variants",
+                  id: variantId,
+                },
+              },
+            },
+          },
+        },
 
+        {
+          headers: {
+            Authorization:
+              `Bearer ${process.env.LEMON_SQUEEZY_API_KEY}`,
 
-    res.status(500).json({
-      error:"Checkout creation failed"
-    });
+            "Content-Type":
+              "application/vnd.api+json",
 
+            Accept:
+              "application/vnd.api+json",
+          },
+        }
+      );
+
+      const checkoutUrl =
+        response.data?.data?.attributes?.url;
+
+      if (!checkoutUrl) {
+        throw new Error(
+          "Lemon Squeezy did not return checkout URL"
+        );
+      }
+
+      console.log(
+        "LEMON CHECKOUT CREATED"
+      );
+
+      return res.json({
+        success: true,
+        url: checkoutUrl,
+      });
+
+    } catch (error) {
+      console.log(
+        "===================================="
+      );
+
+      console.log(
+        "LEMON CHECKOUT ERROR"
+      );
+
+      console.log(
+        error.response?.data ||
+        error.message
+      );
+
+      return res.status(500).json({
+        error:
+          "Checkout creation failed",
+      });
+    }
   }
-
-});
+);
 
 
 // ====================================
 // LEMON SQUEEZY WEBHOOK
 // ====================================
 
-app.post("/lemon-webhook", async (req, res) => {
+app.post(
+  "/lemon-webhook",
+  async (req, res) => {
+    try {
+      console.log(
+        "===================================="
+      );
 
-try{
+      console.log(
+        "LEMON SQUEEZY WEBHOOK RECEIVED"
+      );
 
+      const signature =
+        req.headers["x-signature"];
 
-console.log("LEMON WEBHOOK RECEIVED");
+      const rawBody =
+        req.rawBody;
 
+      if (!rawBody) {
+        console.log(
+          "MISSING RAW BODY"
+        );
 
-const signature = req.headers["x-signature"];
+        return res.status(400).json({
+          error: "Missing raw body",
+        });
+      }
 
-const rawBody = req.rawBody;
+      if (!signature) {
+        console.log(
+          "MISSING WEBHOOK SIGNATURE"
+        );
 
-if (!rawBody) {
-  console.log("Missing raw body");
+        return res.status(401).json({
+          error:
+            "Missing webhook signature",
+        });
+      }
 
-  return res.status(400).json({
-    error: "Missing raw body",
-  });
-}
+      // ====================================
+      // VERIFY SIGNATURE
+      // ====================================
 
-const expectedSignature = crypto
-  .createHmac("sha256", process.env.LEMON_WEBHOOK_SECRET)
-  .update(rawBody)
-  .digest("hex");
+      const expectedSignature =
+        crypto
+          .createHmac(
+            "sha256",
+            process.env.LEMON_WEBHOOK_SECRET
+          )
+          .update(rawBody)
+          .digest("hex");
 
-if (signature !== expectedSignature) {
-  console.log("INVALID LEMON SIGNATURE");
+      if (
+        signature !== expectedSignature
+      ) {
+        console.log(
+          "INVALID LEMON SIGNATURE"
+        );
 
-  return res.status(401).json({
-    error: "Invalid signature",
-  });
-}
+        return res.status(401).json({
+          error:
+            "Invalid signature",
+        });
+      }
 
-const event = JSON.parse(rawBody.toString());
+      // ====================================
+      // PARSE EVENT
+      // ====================================
 
+      const event =
+        JSON.parse(
+          rawBody.toString()
+        );
 
-const order = event.data.attributes;
+      const eventName =
+        event.meta?.event_name;
 
+      console.log(
+        "EVENT:",
+        eventName
+      );
 
-if(
-event.meta.event_name === "order_created"
-){
+      // ====================================
+      // ONLY PROCESS ORDER CREATED
+      // ====================================
 
+      if (
+        eventName !== "order_created"
+      ) {
+        console.log(
+          "EVENT IGNORED:",
+          eventName
+        );
 
-const userId =
-event.meta.custom_data?.user_id;
+        return res.json({
+          received: true,
+        });
+      }
 
-const plan =
-event.meta.custom_data?.plan;
+      // ====================================
+      // GET CUSTOM DATA
+      // ====================================
 
+      const customData =
+        event.meta?.custom_data;
 
+      const userId =
+        customData?.user_id;
 
-console.log(
-"ACTIVATING:",
-userId,
-plan
+      const plan =
+        customData?.plan;
+
+      console.log(
+        "USER ID:",
+        userId
+      );
+
+      console.log(
+        "PLAN:",
+        plan
+      );
+
+      // ====================================
+      // VALIDATE CUSTOM DATA
+      // ====================================
+
+      if (!userId || !plan) {
+        console.log(
+          "MISSING USER ID OR PLAN"
+        );
+
+        return res.status(400).json({
+          error:
+            "Missing custom payment data",
+        });
+      }
+
+      if (
+        !["weekly", "monthly"].includes(
+          plan
+        )
+      ) {
+        console.log(
+          "INVALID PREMIUM PLAN"
+        );
+
+        return res.status(400).json({
+          error:
+            "Invalid Premium plan",
+        });
+      }
+
+      // ====================================
+      // ACTIVATE PREMIUM
+      // ====================================
+
+      console.log(
+        "ACTIVATING PREMIUM"
+      );
+
+      await activatePremium(
+        userId,
+        plan
+      );
+
+      console.log(
+        "LEMON PREMIUM ACTIVATED"
+      );
+
+      return res.json({
+        received: true,
+      });
+
+    } catch (error) {
+      console.log(
+        "LEMON WEBHOOK ERROR:",
+        error.message
+      );
+
+      return res.status(500).json({
+        error:
+          "Webhook processing failed",
+      });
+    }
+  }
 );
-
-
-
-await activatePremium(
-userId,
-plan
-);
-
-
-}
-
-
-
-res.json({
-received:true
-});
-
-
-}catch(error){
-
-
-console.log(
-"LEMON WEBHOOK ERROR",
-error.message
-);
-
-
-res.status(500).json({
-error:error.message
-});
-
-
-}
-
-
-});
 
 
 // ====================================
