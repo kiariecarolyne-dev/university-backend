@@ -350,7 +350,7 @@ app.post("/mpesa-payment", async (req, res) => {
         PartyA: phone,
 
         PartyB:
-          process.env.MPESA_SHORTCODE,
+  process.env.MPESA_TILL_NUMBER,
 
         PhoneNumber: phone,
 
