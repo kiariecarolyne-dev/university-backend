@@ -192,7 +192,7 @@ const getMpesaAccessToken = async () => {
     console.log("AUTH GENERATED SUCCESSFULLY");
 
     const response = await axios.get(
-      "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+      "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
       {
         headers: {
           Authorization: `Basic ${auth}`,
@@ -244,7 +244,22 @@ app.post("/mpesa-payment", async (req, res) => {
   console.log("MPESA ROUTE HIT");
 
   try {
-    const { phone, amount, userId, plan } = req.body;
+    const { phone, userId, plan } = req.body;
+
+    // =========================
+// SECURE PREMIUM PRICING
+// =========================
+let amount;
+
+if (plan === "weekly") {
+  amount = 50;
+} else if (plan === "monthly") {
+  amount = 150;
+} else {
+  return res.status(400).json({
+    error: "Invalid Premium plan",
+  });
+}
 
     // LOG EVERYTHING COMING FROM APP
     console.log("BODY:", req.body);
@@ -276,7 +291,7 @@ app.post("/mpesa-payment", async (req, res) => {
     console.log("SENDING STK PUSH TO SAFARICOM...");
 
     const response = await axios.post(
-      "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+      "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
       {
         BusinessShortCode: process.env.MPESA_SHORTCODE,
         Password: password,
